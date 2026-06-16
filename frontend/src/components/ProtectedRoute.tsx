@@ -1,0 +1,31 @@
+/**
+ * ProtectedRoute: guarda de rutas que redirige a /login si no está autenticado.
+ * Opcionalmente verifica roles.
+ */
+import { Navigate, Outlet } from 'react-router-dom'
+import { useAuthStore } from '@/stores/authStore'
+
+interface ProtectedRouteProps {
+  roles?: Array<'admin' | 'tecnico' | 'viewer'>
+}
+
+export function ProtectedRoute({ roles }: ProtectedRouteProps) {
+  const { isAuthenticated, user } = useAuthStore()
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+
+  if (roles && user && !roles.includes(user.rol)) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-destructive mb-2">Acceso denegado</h1>
+          <p className="text-muted-foreground">No tienes permisos para ver esta página.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return <Outlet />
+}

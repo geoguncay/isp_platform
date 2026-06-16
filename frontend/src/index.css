@@ -1,0 +1,157 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 5%;
+    --foreground: 213 31% 91%;
+    --card: 222 47% 8%;
+    --card-foreground: 213 31% 91%;
+    --popover: 222 47% 8%;
+    --popover-foreground: 213 31% 91%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 5%;
+    --secondary: 222 47% 13%;
+    --secondary-foreground: 213 31% 91%;
+    --muted: 222 47% 13%;
+    --muted-foreground: 215 16% 57%;
+    --accent: 217 91% 60%;
+    --accent-foreground: 222 47% 5%;
+    --destructive: 0 86% 60%;
+    --destructive-foreground: 213 31% 91%;
+    --border: 222 47% 14%;
+    --input: 222 47% 14%;
+    --ring: 217 91% 60%;
+    --radius: 0.75rem;
+
+    /* Status colors */
+    --status-online: 142 76% 45%;
+    --status-offline: 0 86% 60%;
+    --status-degraded: 38 92% 50%;
+    --status-unknown: 215 16% 47%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    background-image:
+      radial-gradient(ellipse at 20% 20%, hsl(217 91% 60% / 0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 80%, hsl(217 91% 60% / 0.03) 0%, transparent 50%);
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  /* ── Card con glassmorphism ── */
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl;
+  }
+
+  /* ── Sidebar nav item ── */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+           text-muted-foreground hover:text-foreground hover:bg-secondary/60
+           transition-all duration-200 cursor-pointer;
+  }
+
+  .nav-item.active {
+    @apply text-primary bg-primary/10 border border-primary/20;
+  }
+
+  /* ── Status badge animado ── */
+  .status-dot {
+    @apply w-2 h-2 rounded-full inline-block;
+  }
+
+  .status-dot.online {
+    background-color: hsl(var(--status-online));
+    box-shadow: 0 0 0 0 hsl(var(--status-online) / 0.4);
+    animation: status-pulse-online 2s ease-in-out infinite;
+  }
+
+  .status-dot.offline {
+    background-color: hsl(var(--status-offline));
+  }
+
+  .status-dot.degraded {
+    background-color: hsl(var(--status-degraded));
+    animation: status-pulse-degraded 1.5s ease-in-out infinite;
+  }
+
+  .status-dot.unknown {
+    background-color: hsl(var(--status-unknown));
+  }
+
+  /* ── Input estilizado ── */
+  .input-field {
+    @apply w-full bg-secondary/50 border border-border rounded-lg px-4 py-2.5
+           text-sm placeholder:text-muted-foreground
+           focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50
+           transition-all duration-200;
+  }
+
+  /* ── Botón primario ── */
+  .btn-primary {
+    @apply bg-primary text-primary-foreground font-medium px-4 py-2.5 rounded-lg text-sm
+           hover:bg-primary/90 active:scale-[0.98]
+           disabled:opacity-50 disabled:cursor-not-allowed
+           transition-all duration-200 flex items-center gap-2;
+  }
+
+  /* ── Botón secundario ── */
+  .btn-secondary {
+    @apply bg-secondary text-foreground font-medium px-4 py-2.5 rounded-lg text-sm border border-border
+           hover:bg-secondary/80 active:scale-[0.98]
+           transition-all duration-200 flex items-center gap-2;
+  }
+
+  /* ── Botón destructivo ── */
+  .btn-destructive {
+    @apply bg-destructive/10 text-destructive font-medium px-4 py-2.5 rounded-lg text-sm border border-destructive/30
+           hover:bg-destructive/20 active:scale-[0.98]
+           transition-all duration-200 flex items-center gap-2;
+  }
+
+  /* ── Table ── */
+  .data-table {
+    @apply w-full text-sm;
+  }
+
+  .data-table th {
+    @apply text-left text-muted-foreground font-medium px-4 py-3 border-b border-border;
+  }
+
+  .data-table td {
+    @apply px-4 py-3 border-b border-border/50;
+  }
+
+  .data-table tr:hover td {
+    @apply bg-secondary/30;
+  }
+}
+
+@keyframes status-pulse-online {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(142 76% 45% / 0.5); }
+  50%       { box-shadow: 0 0 0 6px hsl(142 76% 45% / 0); }
+}
+
+@keyframes status-pulse-degraded {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(38 92% 50% / 0.5); }
+  50%       { box-shadow: 0 0 0 6px hsl(38 92% 50% / 0); }
+}
+
+/* Scrollbar personalizado */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
