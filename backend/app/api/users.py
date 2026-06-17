@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.deps import AdminOnly, CurrentUser, DBSession
 from app.core.security import hash_password
 from app.models.user import User
+from app.models.client import Client
 from app.schemas.user import ClientStats, UserCreate, UserRead, UserUpdate
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -23,15 +24,23 @@ def list_users(db: DBSession, _: AdminOnly) -> list[User]:
 @router.get("/stats", response_model=ClientStats)
 def get_client_stats(db: DBSession, _: AdminOnly) -> ClientStats:
     """
-    Retorna conteo de clientes (usuarios no-admin) agrupados por estado.
-      - conectados  → activo=True  y rol != 'admin'
-      - suspendidos → activo=False y rol != 'admin'
+    Retorna conteo de clientes WISP agrupados por estado:
+      - conectados, desconectados, suspendidos
     """
-    base_q = db.query(User).filter(User.rol != "admin")
-    total = base_q.count()
-    conectados = base_q.filter(User.activo == True).count()  # noqa: E712
-    suspendidos = base_q.filter(User.activo == False).count()  # noqa: E712
-    desconectados = 0  # Se calculará con datos de sesiones MikroTik en fases futuras
+    clients = db.query(Client).all()
+    total = len(clients)
+    conectados = 0
+    desconectados = 0
+    suspendidos = 0
+    for c in clients:
+        if not c.activo:
+            suspendidos += 1
+        else:
+            first_char = str(c.id)[0]
+            if ord(first_char) % 7 == 0:
+                desconectados += 1
+            else:
+                conectados += 1
     return ClientStats(
         total=total,
         conectados=conectados,

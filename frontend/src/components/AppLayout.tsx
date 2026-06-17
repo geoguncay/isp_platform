@@ -6,6 +6,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   Wifi, LayoutDashboard, Router, Users, Bell,
   LogOut, Menu, X, ChevronDown, Activity, Settings, Eye, EyeOff, Network,
+  Zap, Shield,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -13,7 +14,9 @@ import { useSettingsStore } from '@/stores/settingsStore'
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/routers', icon: Router, label: 'Routers', roles: ['admin', 'tecnico'] },
-  { to: '/users', icon: Users, label: 'Usuarios', roles: ['admin'] },
+  { to: '/clients', icon: Users, label: 'Clientes', roles: ['admin', 'tecnico'] },
+  { to: '/plans', icon: Zap, label: 'Planes', roles: ['admin', 'tecnico'] },
+  { to: '/users', icon: Shield, label: 'Usuarios', roles: ['admin'] },
   { to: '/alerts', icon: Bell, label: 'Alertas' },
 ]
 

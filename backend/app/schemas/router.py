@@ -20,6 +20,8 @@ class RouterCreate(BaseModel):
     password_api: str = Field(min_length=1, max_length=255, description="Se cifra con Fernet antes de guardar")
     modelo_hw: str | None = Field(default=None, max_length=120)
     notas: str | None = None
+    latitud: float | None = None
+    longitud: float | None = None
     activo: bool = True
 
 
@@ -31,6 +33,8 @@ class RouterUpdate(BaseModel):
     password_api: str | None = Field(default=None, min_length=1, max_length=255)
     modelo_hw: str | None = None
     notas: str | None = None
+    latitud: float | None = None
+    longitud: float | None = None
     activo: bool | None = None
 
 
@@ -45,6 +49,8 @@ class RouterRead(BaseModel):
     activo: bool
     modelo_hw: str | None
     notas: str | None
+    latitud: float | None
+    longitud: float | None
     created_at: datetime
     updated_at: datetime
     # Estado dinámico (desde Redis, no desde BD)

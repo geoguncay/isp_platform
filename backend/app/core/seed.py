@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.models.user import User
+from app.models.plan import Plan
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,30 @@ def seed_admin(db: Session) -> None:
     logger.info(f"✅ Usuario admin creado: {settings.ADMIN_SEED_EMAIL}")
 
 
+def seed_plans(db: Session) -> None:
+    default_plans = [
+        {"nombre": "Plan Básico 20 Mbps", "velocidad_down_mbps": 20, "velocidad_up_mbps": 10, "precio": 15.00},
+        {"nombre": "Plan Familiar 50 Mbps", "velocidad_down_mbps": 50, "velocidad_up_mbps": 25, "precio": 25.00},
+        {"nombre": "Plan Corporativo 100 Mbps", "velocidad_down_mbps": 100, "velocidad_up_mbps": 50, "precio": 45.00},
+    ]
+    for dp in default_plans:
+        exists = db.query(Plan).filter(Plan.nombre == dp["nombre"]).first()
+        if not exists:
+            plan = Plan(
+                nombre=dp["nombre"],
+                velocidad_down_mbps=dp["velocidad_down_mbps"],
+                velocidad_up_mbps=dp["velocidad_up_mbps"],
+                precio=dp["precio"]
+            )
+            db.add(plan)
+            logger.info(f"✅ Plan de ancho de banda creado: {dp['nombre']}")
+    db.commit()
+
+
 def run_seed() -> None:
     db = SessionLocal()
     try:
         seed_admin(db)
+        seed_plans(db)
     finally:
         db.close()

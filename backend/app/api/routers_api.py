@@ -9,6 +9,9 @@ from sqlalchemy.exc import IntegrityError
 from app.core.deps import AdminOnly, AdminOrTecnico, CurrentUser, DBSession
 from app.core.security import decrypt_secret, encrypt_secret
 from app.models.router import Router
+from app.models.client import Client
+from app.models.static_ip import StaticIP
+from app.services.mikrotik.address_list import fetch_clients_from_address_list
 from app.schemas.router import (
     RouterCreate,
     RouterRead,
@@ -56,6 +59,8 @@ def create_router(payload: RouterCreate, db: DBSession, _: AdminOnly) -> Router:
         activo=payload.activo,
         modelo_hw=payload.modelo_hw,
         notas=payload.notas,
+        latitud=payload.latitud,
+        longitud=payload.longitud,
     )
     db.add(r)
     db.commit()
@@ -199,3 +204,118 @@ def test_router_connection(router_id: uuid.UUID, db: DBSession, _: AdminOnly) ->
             message=f"No se pudo conectar a {r.nombre}",
             error=str(e),
         )
+
+
+@router.get("/{router_id}/address-lists", response_model=list[str])
+def get_router_address_lists(router_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -> list[str]:
+    """
+    Obtiene los nombres de todas las address-lists del router.
+    """
+    r = db.get(Router, router_id)
+    if not r or not r.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Router no encontrado")
+
+    try:
+        with router_pool.connect_to(r) as api_conn:
+            entries = list(api_conn.path('/ip/firewall/address-list'))
+            lists = sorted(list(set(entry.get("list") for entry in entries if entry.get("list"))))
+            return lists
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Fallo al conectar con el router MikroTik: {str(e)}"
+        )
+
+
+@router.post("/{router_id}/import-clients", response_model=dict)
+def import_clients_from_router(
+    router_id: uuid.UUID,
+    db: DBSession,
+    _: AdminOnly,
+    list_name: str = "clientes"
+) -> dict:
+    """
+    Importa clientes de una address-list de MikroTik especificada a la base de datos,
+    y los agrega a la lista 'clientes' del router como clientes nuevos.
+    Genera cédulas ecuatorianas válidas de forma determinista para cumplir con el esquema.
+    """
+    r = db.get(Router, router_id)
+    if not r or not r.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Router no encontrado")
+
+    try:
+        raw_clients = fetch_clients_from_address_list(r, list_name)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Fallo al conectar con el router MikroTik: {str(e)}"
+        )
+
+    imported_count = 0
+    from app.services.mikrotik.address_list import sync_ip_in_address_list
+
+    def generate_dummy_cedula(idx: int) -> str:
+        # Generar una cédula válida ecuatoriana con prefijo 30
+        base = f"3099999{idx:02d}"
+        coefs = [2, 1, 2, 1, 2, 1, 2, 1, 2]
+        suma = 0
+        for i in range(9):
+            val = int(base[i]) * coefs[i]
+            if val >= 10:
+                val -= 9
+            suma += val
+        residuo = suma % 10
+        check_digit = 0 if residuo == 0 else 10 - residuo
+        return f"{base}{check_digit}"
+
+    existing_imported_count = db.query(Client).filter(Client.cedula.like("3099999%")).count()
+
+    for rc in raw_clients:
+        ip = rc["ip"]
+        comment = rc["comment"]
+
+        # Validar si la IP ya existe registrada en este router
+        exists_ip = db.query(StaticIP).filter(
+            StaticIP.router_id == router_id,
+            StaticIP.ip == ip
+        ).first()
+
+        if exists_ip:
+            continue
+
+        name = comment if comment else f"Importado IP {ip}"
+        cedula = generate_dummy_cedula(existing_imported_count + imported_count)
+
+        # Crear Cliente
+        client = Client(
+            nombre=name,
+            cedula=cedula,
+            telefono="0999999999",
+            direccion="Importado desde MikroTik",
+            router_id=router_id,
+            tipo="static",
+            activo=True,
+        )
+        db.add(client)
+        db.flush()
+
+        # Crear StaticIP
+        static_ip = StaticIP(
+            cliente_id=client.id,
+            ip=ip,
+            router_id=router_id,
+            notas=f"Importado automáticamente desde lista '{list_name}'"
+        )
+        db.add(static_ip)
+
+        # Sincronizar (agregar) a la lista 'clientes' en MikroTik si no es la misma
+        try:
+            sync_ip_in_address_list(r, ip, name)
+        except Exception as e:
+            # Continuar incluso si falla la escritura en el router para no romper la importación
+            pass
+
+        imported_count += 1
+
+    db.commit()
+    return {"status": "success", "imported_count": imported_count}

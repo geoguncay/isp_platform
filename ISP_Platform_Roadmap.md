@@ -55,32 +55,32 @@ isp-platform/
 
 ### 1.1 Setup del proyecto
 
-- [ ] Crear monorepo con carpetas `backend/`, `frontend/`, `mobile/`
-- [ ] Configurar `docker-compose.yml` con servicios: `api`, `postgres`, `redis`, `celery-worker`, `adminer`
-- [ ] Estructura de carpetas FastAPI: `/api`, `/models`, `/schemas`, `/services`, `/workers`, `/core`
-- [ ] Configurar Alembic para migraciones de base de datos
-- [ ] Pydantic Settings v2 con validación de variables de entorno (`.env`)
-- [ ] Configurar Ruff + Black (Python) y ESLint + Prettier (TypeScript)
-- [ ] Setup Vite + React + TypeScript + Tailwind CSS + shadcn/ui
-- [ ] GitHub Actions CI: lint + tests en cada push a `main`
+- [x] Crear monorepo con carpetas `backend/`, `frontend/`, `mobile/`
+- [x] Configurar `docker-compose.yml` con servicios: `api`, `postgres`, `redis`, `celery-worker`, `adminer`
+- [x] Estructura de carpetas FastAPI: `/api`, `/models`, `/schemas`, `/services`, `/workers`, `/core`
+- [x] Configurar Alembic para migraciones de base de datos
+- [x] Pydantic Settings v2 con validación de variables de entorno (`.env`)
+- [x] Configurar Ruff + Black (Python) y ESLint + Prettier (TypeScript)
+- [x] Setup Vite + React + TypeScript + Tailwind CSS + shadcn/ui
+- [x] GitHub Actions CI: lint + tests en cada push a `main`
 
 ### 1.2 Autenticación y usuarios
 
-- [ ] Modelo `User`: id, nombre, email, contraseña (bcrypt), rol (admin / técnico / viewer), activo
-- [ ] Endpoints JWT: `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`
-- [ ] Middleware de permisos por rol con decoradores FastAPI
-- [ ] Gestión de sesiones (refresh tokens) en Redis con TTL
-- [ ] UI: pantalla de login con Tailwind + shadcn/ui, guards de rutas React Router
-- [ ] UI: panel de gestión de usuarios (solo admin)
+- [x] Modelo `User`: id, nombre, email, contraseña (bcrypt), rol (admin / técnico / viewer), activo
+- [x] Endpoints JWT: `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`
+- [x] Middleware de permisos por rol con decoradores FastAPI
+- [x] Gestión de sesiones (refresh tokens) en Redis con TTL
+- [x] UI: pantalla de login con Tailwind + shadcn/ui, guards de rutas React Router
+- [x] UI: panel de gestión de usuarios (solo admin)
 
 ### 1.3 Modelo multi-router
 
-- [ ] Modelo `Router`: id, nombre, ip_zerotier, usuario_api, contraseña (Fernet cifrada), activo, modelo_hw, notas
-- [ ] Servicio `RouterPool`: pool de conexiones `librouteros` por `router_id`, con reconexión automática
-- [ ] Health check automático cada 60 s (Celery Beat) → estado en Redis
-- [ ] Endpoint `GET /routers/{id}/status`: ping, versión RouterOS, uptime, interfaces
-- [ ] UI: CRUD de routers con indicador de estado en tiempo real (verde/rojo/amarillo)
-- [ ] UI: test de conexión manual desde el formulario
+- [x] Modelo `Router`: id, nombre, ip, usuario_api, contraseña (Fernet cifrada), activo, modelo_hw, notas
+- [x] Servicio `RouterPool`: pool de conexiones `librouteros` por `router_id`, con reconexión automática
+- [x] Health check automático cada 60 s (Celery Beat) → estado en Redis
+- [x] Endpoint `GET /routers/{id}/status`: ping, versión RouterOS, uptime, interfaces
+- [x] UI: CRUD de routers con indicador de estado en tiempo real (verde/rojo/amarillo)
+- [x] UI: test de conexión manual desde el formulario
 
 ---
 
@@ -91,21 +91,21 @@ isp-platform/
 
 ### 2.1 Gestión de clientes
 
-- [ ] Modelo `Client`: id, nombre, cédula, teléfono, dirección, coordenadas GPS, router_id, tipo (static/pppoe), activo
-- [ ] Modelo `Plan`: id, nombre, velocidad_down_mbps, velocidad_up_mbps, precio
-- [ ] Modelo `ClientPlan`: cliente_id, plan_id, fecha_inicio, fecha_fin, estado (activo/suspendido/cancelado)
-- [ ] CRUD completo de clientes con validaciones de cédula ecuatoriana
-- [ ] UI: listado con filtros dinámicos (router, plan, estado, zona) + paginación
-- [ ] UI: formulario de nuevo cliente con mapa Leaflet para marcar coordenadas GPS
-- [ ] UI: perfil de cliente — historial de planes, suspensiones, pagos y tickets
+- [x] Modelo `Client`: id, nombre, cédula, teléfono, dirección, coordenadas GPS, router_id, tipo (static/pppoe), activo
+- [x] Modelo `Plan`: id, nombre, velocidad_down_mbps, velocidad_up_mbps, precio
+- [x] Modelo `ClientPlan`: cliente_id, plan_id, fecha_inicio, fecha_fin, estado (activo/suspendido/cancelado)
+- [x] CRUD completo de clientes con validaciones de cédula ecuatoriana
+- [x] UI: listado con filtros dinámicos (router, plan, estado, zona) + paginación
+- [x] UI: formulario de nuevo cliente con mapa Leaflet para marcar coordenadas GPS
+- [x] UI: perfil de cliente — historial de planes, suspensiones, pagos y tickets
 
 ### 2.2 IP estáticas y sincronización MikroTik
 
-- [ ] Modelo `StaticIP`: cliente_id, ip, router_id, mac (opcional), notas
-- [ ] Servicio: al crear cliente → agregar IP a `/ip firewall address-list list=clientes`
-- [ ] Importar clientes existentes del router (address-list → BD)
-- [ ] Validación: IP no duplicada dentro del mismo router
-- [ ] Endpoint `POST /clients/{id}/sync-router`: forzar sincronización manual
+- [x] Modelo `StaticIP`: cliente_id, ip, router_id, mac (opcional), notas
+- [x] Servicio: al crear cliente → agregar IP a `/ip firewall address-list list=clientes`
+- [x] Importar clientes existentes del router (address-list → BD)
+- [x] Validación: IP no duplicada dentro del mismo router
+- [x] Endpoint `POST /clients/{id}/sync-router`: forzar sincronización manual
 
 ### 2.3 Colas de ancho de banda
 

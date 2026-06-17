@@ -3,12 +3,14 @@
  */
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw, Wifi, Server, Clock, ChevronRight, Trash2, Edit2 } from 'lucide-react'
+import { Plus, RefreshCw, Wifi, Server, Clock, Trash2, Edit2, Download, X, Loader2 } from 'lucide-react'
 import api from '@/services/api'
 import { RouterStatusBadge } from '@/components/RouterStatusBadge'
 import { RouterFormDialog } from '@/components/RouterFormDialog'
 import { useAuthStore } from '@/stores/authStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useNavigate } from 'react-router-dom'
+import { formatUptime } from '@/lib/utils'
 
 interface Router {
   id: string
@@ -38,10 +40,27 @@ export function RoutersPage() {
   const { hideIps } = useSettingsStore()
   const queryClient = useQueryClient()
   const isAdmin = user?.rol === 'admin'
+  const navigate = useNavigate()
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingRouter, setEditingRouter] = useState<Router | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [importingRouterId, setImportingRouterId] = useState<string | null>(null)
+
+  // Address-list client import states
+  const [importingRouter, setImportingRouter] = useState<Router | null>(null)
+  const [selectedListName, setSelectedListName] = useState('clientes')
+  const [customListName, setCustomListName] = useState('')
+
+  // Query to get address list names from the selected router
+  const { data: addressLists = [], isLoading: isLoadingLists } = useQuery<string[]>({
+    queryKey: ['address-lists', importingRouter?.id],
+    queryFn: async () => {
+      const { data } = await api.get(`/routers/${importingRouter?.id}/address-lists`)
+      return data
+    },
+    enabled: !!importingRouter,
+  })
 
   const { data: routers = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ['routers'],
@@ -56,6 +75,36 @@ export function RoutersPage() {
       setConfirmDelete(null)
     },
   })
+
+  const importMutation = useMutation({
+    mutationFn: async (payload: { routerId: string; listName: string }) => {
+      setImportingRouterId(payload.routerId)
+      const { data } = await api.post(`/routers/${payload.routerId}/import-clients`, null, {
+        params: { list_name: payload.listName }
+      })
+      return data
+    },
+    onSuccess: (data: any) => {
+      alert(`Importación exitosa. Se importaron ${data.imported_count} nuevos clientes.`)
+      setImportingRouterId(null)
+      setImportingRouter(null)
+      queryClient.invalidateQueries({ queryKey: ['routers'] })
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.detail || 'Error al importar clientes desde el router.'
+      alert(msg)
+      setImportingRouterId(null)
+      setImportingRouter(null)
+    }
+  })
+
+  const handleImportSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!importingRouter) return
+    const listName = selectedListName === 'custom' ? customListName.trim() : selectedListName
+    if (!listName) return
+    importMutation.mutate({ routerId: importingRouter.id, listName })
+  }
 
   const onlineCount = routers.filter((r) => r.status === 'online').length
   const offlineCount = routers.filter((r) => r.status === 'offline').length
@@ -147,12 +196,15 @@ export function RoutersPage() {
                 <th>Estado</th>
                 <th className="hidden lg:table-cell">Versión ROS</th>
                 <th className="hidden lg:table-cell">Uptime</th>
-                {isAdmin && <th className="text-right">Acciones</th>}
               </tr>
             </thead>
             <tbody>
               {routers.map((router) => (
-                <tr key={router.id} className="group">
+                <tr
+                  key={router.id}
+                  onClick={() => navigate(`/routers/${router.id}`)}
+                  className="group cursor-pointer hover:bg-secondary/40 transition-colors"
+                >
                   <td>
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-brand-900/50 rounded-lg flex items-center justify-center border border-brand-800/50">
@@ -181,31 +233,9 @@ export function RoutersPage() {
                   </td>
                   <td className="hidden lg:table-cell">
                     <span className="text-xs text-muted-foreground">
-                      {router.uptime ?? '—'}
+                      {formatUptime(router.uptime)}
                     </span>
                   </td>
-                  {isAdmin && (
-                    <td className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          id={`edit-router-${router.id}`}
-                          onClick={() => { setEditingRouter(router); setDialogOpen(true) }}
-                          className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-                          title="Editar"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          id={`delete-router-${router.id}`}
-                          onClick={() => setConfirmDelete(router.id)}
-                          className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  )}
                 </tr>
               ))}
             </tbody>
@@ -244,13 +274,108 @@ export function RoutersPage() {
       {/* ── Dialog crear/editar ── */}
       <RouterFormDialog
         open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        onClose={() => { setDialogOpen(false); setEditingRouter(null) }}
         router={editingRouter}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ['routers'] })
           setDialogOpen(false)
+          setEditingRouter(null)
         }}
+        onDelete={(id) => setConfirmDelete(id)}
       />
+
+      {/* Modal Importar Clientes de Address-list */}
+      {importingRouter && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card w-full max-w-md mx-4 animate-fade-in border border-border/50">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <Download className="w-5 h-5 text-brand-400" />
+                Importar desde Address-list
+              </h2>
+              <button
+                type="button"
+                onClick={() => setImportingRouter(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleImportSubmit} className="p-5 space-y-4">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Selecciona una lista de direcciones del router <strong>{importingRouter.nombre}</strong>. Se importarán todas sus IPs y se registrarán como nuevos clientes en el sistema y en la lista <strong>clientes</strong> de MikroTik.
+              </p>
+
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1.5">
+                  Seleccionar Address-list *
+                </label>
+                {isLoadingLists ? (
+                  <div className="text-xs text-muted-foreground py-2 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando listas del router...
+                  </div>
+                ) : (
+                  <select
+                    value={selectedListName}
+                    onChange={(e) => {
+                      setSelectedListName(e.target.value)
+                      if (e.target.value !== 'custom') {
+                        setCustomListName('')
+                      }
+                    }}
+                    className="input-field cursor-pointer"
+                  >
+                    <option value="clientes">clientes (Por defecto)</option>
+                    {addressLists
+                      .filter((l: string) => l !== 'clientes')
+                      .map((listName: string) => (
+                        <option key={listName} value={listName}>
+                          {listName}
+                        </option>
+                      ))}
+                    <option value="custom">-- Escribir nombre personalizado --</option>
+                  </select>
+                )}
+              </div>
+
+              {selectedListName === 'custom' && (
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1.5">
+                    Nombre de la lista personalizado *
+                  </label>
+                  <input
+                    type="text"
+                    value={customListName}
+                    onChange={(e) => setCustomListName(e.target.value)}
+                    placeholder="Ej: IPs_Nuevas, WAN_List, etc."
+                    required
+                    className="input-field font-sans"
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setImportingRouter(null)}
+                  className="btn-secondary flex-1 justify-center"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={importMutation.isPending || (selectedListName === 'custom' && !customListName.trim())}
+                  className="btn-primary flex-1 justify-center"
+                >
+                  {importMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {importMutation.isPending ? 'Importando...' : 'Importar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
