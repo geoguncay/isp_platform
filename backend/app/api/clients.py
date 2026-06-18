@@ -17,6 +17,7 @@ from app.models.static_ip import StaticIP
 from app.models.payment import ClientPayment
 from app.models.ticket import ClientTicket
 from app.services.mikrotik.address_list import sync_ip_in_address_list, remove_ip_from_address_list
+from app.services.mikrotik.queue import sync_client_queue, remove_client_queue, toggle_client_queue
 from app.schemas.client import (
     ClientCreate,
     ClientListResponse,
@@ -243,14 +244,25 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
         )
         db.add(static_ip)
         
-        # Sincronizar con MikroTik síncronamente
+        # Sincronizar con MikroTik síncronamente (address-list y cola simple)
         try:
             sync_ip_in_address_list(r, payload.ip, client.nombre)
+            if payload.plan_id:
+                p = db.get(Plan, payload.plan_id)
+                if p:
+                    sync_client_queue(
+                        router=r,
+                        client_name=client.nombre,
+                        ip=payload.ip,
+                        speed_up=p.velocidad_up_mbps,
+                        speed_down=p.velocidad_down_mbps,
+                        plan_name=p.nombre
+                    )
         except Exception as e:
             db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"No se pudo registrar la IP en el router MikroTik. Verifique conectividad. Error: {str(e)}"
+                detail=f"No se pudo registrar la IP o la cola en el router MikroTik. Verifique conectividad. Error: {str(e)}"
             )
 
     db.commit()
@@ -309,16 +321,20 @@ def update_client(
             remove_ip_from_address_list(client.router, client.static_ip.ip)
         except Exception as e:
             logger.warning(f"No se pudo remover la IP en MikroTik al cambiar a PPPoE: {e}")
+        try:
+            remove_client_queue(client.router, client.static_ip.ip)
+        except Exception as e:
+            logger.warning(f"No se pudo remover la cola en MikroTik al cambiar a PPPoE: {e}")
         db.delete(client.static_ip)
 
     # Si es static o cambia a static, validar y sincronizar IP
     elif new_tipo == "static":
         ip_val = update_data.get("ip") if "ip" in update_data else old_ip
         if not ip_val:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="La dirección IP es obligatoria para conexiones estáticas.",
-            )
+             raise HTTPException(
+                 status_code=status.HTTP_400_BAD_REQUEST,
+                 detail="La dirección IP es obligatoria para conexiones estáticas.",
+             )
 
         # Validar IP única en el router de destino
         if "ip" in update_data or "router_id" in update_data:
@@ -341,6 +357,10 @@ def update_client(
                 remove_ip_from_address_list(old_router, old_ip)
             except Exception as e:
                 logger.warning(f"No se pudo remover la IP anterior en MikroTik: {e}")
+            try:
+                remove_client_queue(old_router, old_ip)
+            except Exception as e:
+                logger.warning(f"No se pudo remover la cola anterior en MikroTik: {e}")
 
         # Guardar en base de datos
         if client.static_ip:
@@ -357,25 +377,43 @@ def update_client(
                 notas=update_data.get("notas_ip"),
             )
 
-        # Sincronizar o remover IP en el router MikroTik según estado activo
+        # Sincronizar o remover IP / queue en el router MikroTik según estado activo
         new_activo = update_data.get("activo", client.activo)
         if new_activo:
             try:
                 sync_ip_in_address_list(new_router, ip_val, update_data.get("nombre", client.nombre))
+                # Obtener plan activo del cliente para sincronizar la cola
+                active_client_plan = (
+                    db.query(ClientPlan)
+                    .filter(ClientPlan.cliente_id == client.id, ClientPlan.estado == "activo")
+                    .first()
+                )
+                if active_client_plan and active_client_plan.plan:
+                    p = active_client_plan.plan
+                    sync_client_queue(
+                        router=new_router,
+                        client_name=update_data.get("nombre", client.nombre),
+                        ip=ip_val,
+                        speed_up=p.velocidad_up_mbps,
+                        speed_down=p.velocidad_down_mbps,
+                        plan_name=p.nombre
+                    )
             except Exception as e:
                 db.rollback()
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Error al sincronizar la IP con el router MikroTik: {str(e)}"
+                    detail=f"Error al sincronizar con el router MikroTik: {str(e)}"
                 )
         else:
             try:
                 if old_ip:
                     remove_ip_from_address_list(old_router, old_ip)
+                    remove_client_queue(old_router, old_ip)
                 if ip_val != old_ip:
                     remove_ip_from_address_list(new_router, ip_val)
+                    remove_client_queue(new_router, ip_val)
             except Exception as e:
-                logger.warning(f"No se pudo remover la IP en MikroTik al desactivar cliente: {e}")
+                logger.warning(f"No se pudo remover la IP o cola en MikroTik al desactivar cliente: {e}")
 
     # Actualizar campos básicos
     for field, value in update_data.items():
@@ -403,6 +441,10 @@ def delete_client(client_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -> Non
             remove_ip_from_address_list(client.router, client.static_ip.ip)
         except Exception as e:
             logger.warning(f"No se pudo remover la IP en MikroTik al borrar cliente: {e}")
+        try:
+            remove_client_queue(client.router, client.static_ip.ip)
+        except Exception as e:
+            logger.warning(f"No se pudo remover la cola en MikroTik al borrar cliente: {e}")
 
     db.delete(client)
     db.commit()
@@ -455,6 +497,23 @@ def assign_client_plan(
         ap.estado = "cancelado"
         ap.fecha_fin = now
 
+    # Sincronizar cola en MikroTik si el cliente es estático y tiene IP
+    if client.tipo == "static" and client.static_ip:
+        try:
+            sync_client_queue(
+                router=client.router,
+                client_name=client.nombre,
+                ip=client.static_ip.ip,
+                speed_up=plan.velocidad_up_mbps,
+                speed_down=plan.velocidad_down_mbps,
+                plan_name=plan.nombre
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Fallo al actualizar la cola en MikroTik: {str(e)}"
+            )
+
     # Crear el nuevo registro del plan
     new_client_plan = ClientPlan(
         cliente_id=client_id,
@@ -471,7 +530,7 @@ def assign_client_plan(
 
 @router.post("/{client_id}/sync-router")
 def sync_client_router(client_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -> dict:
-    """Sincroniza manualmente la dirección IP estática en el MikroTik."""
+    """Sincroniza manualmente la dirección IP estática y la cola de ancho de banda en el MikroTik."""
     client = db.get(Client, client_id)
     if not client:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
@@ -480,13 +539,59 @@ def sync_client_router(client_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -
     if client.tipo != "static" or not client.static_ip:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El cliente no posee IP estática activa.")
 
+    active_client_plan = (
+        db.query(ClientPlan)
+        .filter(ClientPlan.cliente_id == client.id, ClientPlan.estado == "activo")
+        .first()
+    )
+
     try:
         sync_ip_in_address_list(client.router, client.static_ip.ip, client.nombre)
-        return {"status": "success", "message": "Sincronización de IP exitosa en el router MikroTik."}
+        if active_client_plan and active_client_plan.plan:
+            p = active_client_plan.plan
+            sync_client_queue(
+                router=client.router,
+                client_name=client.nombre,
+                ip=client.static_ip.ip,
+                speed_up=p.velocidad_up_mbps,
+                speed_down=p.velocidad_down_mbps,
+                plan_name=p.nombre
+            )
+        return {"status": "success", "message": "Sincronización de IP y cola exitosa en el router MikroTik."}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Fallo al contactar el router MikroTik: {str(e)}"
+        )
+
+
+@router.post("/{client_id}/toggle-queue")
+def toggle_client_queue_endpoint(
+    client_id: uuid.UUID,
+    disabled: bool,
+    db: DBSession,
+    _: AdminOrTecnico
+) -> dict:
+    """Habilita o desactiva la cola simple del cliente en MikroTik."""
+    client = db.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+    if client.tipo != "static" or not client.static_ip:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El cliente no posee IP estática configurada."
+        )
+
+    try:
+        toggle_client_queue(client.router, client.static_ip.ip, disabled)
+        return {
+            "status": "success",
+            "message": f"Cola {'deshabilitada' if disabled else 'habilitada'} exitosamente en MikroTik."
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Fallo al actualizar el estado de la cola en MikroTik: {str(e)}"
         )
 
 

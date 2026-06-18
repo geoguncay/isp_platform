@@ -109,12 +109,12 @@ isp-platform/
 
 ### 2.3 Colas de ancho de banda
 
-- [ ] Servicio `QueueService`: crear Simple Queue hija bajo cola padre por router
-- [ ] Convención de nombre: `comment` = tag del plan (compatible con scripts CAKE existentes)
-- [ ] Endpoint: cambio de plan → modifica `max-limit` de la cola en RouterOS en tiempo real
-- [ ] Endpoint: deshabilitar / habilitar cola por `cliente_id`
-- [ ] UI: vista de colas activas por router — nombre, límites, TX/RX actual
-- [ ] UI: botón de cambio de plan con efecto inmediato y confirmación
+- [x] Servicio `QueueService`: crear Simple Queue hija bajo cola padre por router
+- [x] Convención de nombre: `comment` = tag del plan (compatible con scripts CAKE existentes)
+- [x] Endpoint: cambio de plan → modifica `max-limit` de la cola en RouterOS en tiempo real
+- [x] Endpoint: deshabilitar / habilitar cola por `cliente_id`
+- [x] UI: vista de colas activas por router — nombre, límites, TX/RX actual
+- [x] UI: botón de cambio de plan con efecto inmediato y confirmación
 
 ### 2.4 Suspensión y reactivación
 

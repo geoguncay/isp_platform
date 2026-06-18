@@ -12,6 +12,7 @@ from app.models.router import Router
 from app.models.client import Client
 from app.models.static_ip import StaticIP
 from app.services.mikrotik.address_list import fetch_clients_from_address_list
+from app.services.mikrotik.queue import fetch_queues
 from app.schemas.router import (
     RouterCreate,
     RouterRead,
@@ -319,3 +320,93 @@ def import_clients_from_router(
 
     db.commit()
     return {"status": "success", "imported_count": imported_count}
+
+
+@router.get("/{router_id}/queues", response_model=list[dict])
+def get_router_queues(router_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -> list[dict]:
+    """
+    Obtiene la lista de colas del router, enriqueciéndolas con el cliente_id,
+    nombre de cliente y plan_activo de la base de datos basándose en el target IP.
+    """
+    r = db.get(Router, router_id)
+    if not r or not r.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Router no encontrado")
+
+    try:
+        queues = fetch_queues(r)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Fallo al conectar con el router MikroTik: {str(e)}"
+        )
+
+    # Obtener todos los clientes asociados a este router que tengan IP estática
+    db_clients = (
+        db.query(Client)
+        .join(StaticIP, Client.id == StaticIP.cliente_id)
+        .filter(Client.router_id == router_id)
+        .all()
+    )
+
+    # Mapeo de IP -> Datos del cliente
+    from app.models.client_plan import ClientPlan
+    client_map = {}
+    for client in db_clients:
+        if client.static_ip:
+            active_plan = (
+                db.query(ClientPlan)
+                .filter(ClientPlan.cliente_id == client.id, ClientPlan.estado == "activo")
+                .first()
+            )
+            plan_info = {
+                "id": active_plan.plan.id if active_plan and active_plan.plan else None,
+                "nombre": active_plan.plan.nombre if active_plan and active_plan.plan else "Sin plan"
+            }
+            client_map[client.static_ip.ip] = {
+                "id": client.id,
+                "nombre": client.nombre,
+                "plan": plan_info
+            }
+
+    def format_bps(bps_str: str) -> str:
+        try:
+            up, down = bps_str.split('/')
+            up_val = int(up)
+            down_val = int(down)
+            
+            def to_human(val: int) -> str:
+                if val >= 1000000:
+                    return f"{val / 1000000:.1f} Mbps"
+                elif val >= 1000:
+                    return f"{val / 1000:.1f} Kbps"
+                else:
+                    return f"{val} bps"
+            
+            return f"↑ {to_human(up_val)} / ↓ {to_human(down_val)}"
+        except Exception:
+            return bps_str
+
+    enriched_queues = []
+    for q in queues:
+        target = q.get("target", "")
+        ip = target.split('/')[0] if '/' in target else target
+        
+        client_info = client_map.get(ip)
+        
+        q_data = {
+            "id": q.get("id"),
+            "name": q.get("name"),
+            "target": target,
+            "max_limit": q.get("max_limit"),
+            "rate": q.get("rate"),
+            "rate_human": format_bps(q.get("rate", "0/0")),
+            "parent": q.get("parent"),
+            "comment": q.get("comment"),
+            "disabled": q.get("disabled"),
+            "cliente_id": client_info["id"] if client_info else None,
+            "cliente_nombre": client_info["nombre"] if client_info else None,
+            "plan_activo": client_info["plan"] if client_info else None,
+        }
+        enriched_queues.append(q_data)
+
+    return enriched_queues

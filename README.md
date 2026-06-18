@@ -1,6 +1,6 @@
 # ISP Platform 🌐
 
-> **Sistema de gestión centralizada para ISPs / WISPs** con integración MikroTik RouterOS API, túneles VPN ZeroTier, facturación electrónica ecuatoriana (SRI) y monitoreo en tiempo real.
+> **Sistema de gestión centralizada para ISPs / WISPs** con integración MikroTik RouterOS API, facturación electrónica ecuatoriana (SRI) y monitoreo en tiempo real.
 
 ---
 

@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, RefreshCw, MapPin, Shield, Wifi, Server, Clock,
   CheckCircle2, XCircle, Sliders, AlertCircle, Loader2, X, Plus,
-  Edit2, Trash2, Download, Search, Users, Network
+  Edit2, Trash2, Download, Search, Users, Network, Activity
 } from 'lucide-react'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
@@ -152,7 +152,9 @@ export function RouterProfilePage() {
   const { hideIps } = useSettingsStore()
   const isAdmin = user?.rol === 'admin'
 
-  const [activeTab, setActiveTab] = useState<'stats' | 'clients' | 'map' | 'settings'>('stats')
+  const [activeTab, setActiveTab] = useState<'stats' | 'clients' | 'queues' | 'map' | 'settings'>('stats')
+  const [selectedQueue, setSelectedQueue] = useState<any | null>(null)
+  const [selectedPlanId, setSelectedPlanId] = useState<string>('')
   const [searchTerm, setSearchTerm] = useState('')
   const [editOpen, setEditOpen] = useState(false)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
@@ -214,6 +216,59 @@ export function RouterProfilePage() {
       return data
     },
     enabled: importingOpen,
+  })
+
+  // Consultar colas asociadas
+  const { data: queues = [], isLoading: isLoadingQueues, refetch: refetchQueues } = useQuery({
+    queryKey: ['router-queues', id],
+    queryFn: async () => {
+      const { data } = await api.get(`/routers/${id}/queues`)
+      return data
+    },
+    enabled: activeTab === 'queues',
+  })
+
+  // Consultar todos los planes disponibles (para cambiar plan en modal)
+  const { data: plans = [] } = useQuery({
+    queryKey: ['plans-all'],
+    queryFn: async () => {
+      const { data } = await api.get('/plans')
+      return data
+    },
+    enabled: activeTab === 'queues',
+  })
+
+  // Mutación para activar/desactivar cola
+  const toggleQueueMutation = useMutation({
+    mutationFn: async ({ clientId, disabled }: { clientId: string; disabled: boolean }) => {
+      await api.post(`/clients/${clientId}/toggle-queue`, null, {
+        params: { disabled }
+      })
+    },
+    onSuccess: () => {
+      refetchQueues()
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.detail || 'Error al cambiar estado de la cola'
+      alert(msg)
+    }
+  })
+
+  // Mutación para cambiar plan al vuelo
+  const changePlanMutation = useMutation({
+    mutationFn: async ({ clientId, planId }: { clientId: string; planId: string }) => {
+      await api.post(`/clients/${clientId}/assign-plan`, null, {
+        params: { plan_id: planId }
+      })
+    },
+    onSuccess: () => {
+      refetchQueues()
+      setSelectedQueue(null)
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.detail || 'Error al cambiar plan en tiempo real'
+      alert(msg)
+    }
   })
 
   // Mutación para probar conexión
@@ -450,6 +505,7 @@ export function RouterProfilePage() {
             {[
               { id: 'stats', label: 'Estadísticas', icon: Network },
               { id: 'clients', label: 'Clientes Asociados', icon: Users },
+              { id: 'queues', label: 'Colas de Tráfico', icon: Activity },
               { id: 'map', label: 'Mapa de Cobertura', icon: MapPin },
               { id: 'settings', label: 'Configuración & Diagnóstico', icon: Sliders },
             ].map((tab) => {
@@ -634,6 +690,133 @@ export function RouterProfilePage() {
                     </div>
                   )}
                 </>
+              )}
+            </div>
+          )}
+
+          {/* Pestaña: Colas de Tráfico */}
+          {activeTab === 'queues' && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center bg-secondary/15 p-4 rounded-xl border border-border/40">
+                <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
+                  Listado de colas simples (Simple Queues) activas en el MikroTik. Las colas enlazadas a clientes locales permiten interactuar directamente para activar, desactivar o modificar sus límites de velocidad.
+                </p>
+                <button
+                  onClick={() => refetchQueues()}
+                  disabled={isLoadingQueues}
+                  className="btn-secondary text-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingQueues ? 'animate-spin' : ''}`} />
+                  Actualizar
+                </button>
+              </div>
+
+              {isLoadingQueues ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="flex items-center gap-3 text-muted-foreground">
+                    <Loader2 className="w-5 h-5 animate-spin text-brand-400" />
+                    <span>Cargando colas de tráfico desde MikroTik...</span>
+                  </div>
+                </div>
+              ) : queues.length === 0 ? (
+                <div className="glass-card p-8 text-center text-muted-foreground">
+                  <Sliders className="w-10 h-10 mx-auto mb-2 text-muted-foreground/60" />
+                  No se encontraron colas simples configuradas en este router.
+                </div>
+              ) : (
+                <div className="glass-card overflow-hidden font-sans">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Cola / Cliente</th>
+                        <th>IP de Destino (Target)</th>
+                        <th>Límites (Upload / Download)</th>
+                        <th>Tráfico actual (TX / RX)</th>
+                        <th>Cola Padre</th>
+                        <th>Estado</th>
+                        {isAdmin && <th className="text-right">Acciones</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {queues.map((q: any) => (
+                        <tr key={q.id} className="hover:bg-secondary/40 transition-colors">
+                          <td>
+                            {q.cliente_id ? (
+                              <div
+                                onClick={() => navigate(`/clients/${q.cliente_id}`)}
+                                className="font-semibold text-sm text-brand-400 hover:underline cursor-pointer"
+                              >
+                                {q.name}
+                              </div>
+                            ) : (
+                              <div className="font-semibold text-sm text-foreground flex items-center gap-1.5">
+                                {q.name}
+                                <span className="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.2 rounded-full uppercase font-bold">Huérfana</span>
+                              </div>
+                            )}
+                            <div className="text-xs text-muted-foreground font-mono">
+                              Comentario: {q.comment || 'Sin comentario'}
+                            </div>
+                          </td>
+                          <td>
+                            <code className="text-xs font-mono text-muted-foreground bg-secondary/60 px-1.5 py-0.5 rounded">
+                              {q.target}
+                            </code>
+                          </td>
+                          <td className="text-xs font-mono font-medium text-foreground">
+                            {q.max_limit}
+                          </td>
+                          <td className="text-xs font-mono text-brand-400 font-semibold">
+                            {q.rate_human}
+                          </td>
+                          <td className="text-xs text-muted-foreground">
+                            {q.parent || '—'}
+                          </td>
+                          <td>
+                            <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${!q.disabled
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : 'bg-destructive/10 text-destructive border border-destructive/20'
+                              }`}>
+                              {!q.disabled ? 'Activo' : 'Suspendido'}
+                            </span>
+                          </td>
+                          {isAdmin && (
+                            <td className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                {q.cliente_id && (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        setSelectedQueue(q)
+                                        setSelectedPlanId(q.plan_activo?.id || '')
+                                      }}
+                                      className="btn-secondary py-1 px-2.5 text-xs flex items-center gap-1 hover:text-brand-400"
+                                      title="Cambiar velocidad/plan al vuelo"
+                                    >
+                                      <Sliders className="w-3 h-3" />
+                                      Cambiar Plan
+                                    </button>
+                                    <button
+                                      onClick={() => toggleQueueMutation.mutate({
+                                        clientId: q.cliente_id,
+                                        disabled: !q.disabled
+                                      })}
+                                      disabled={toggleQueueMutation.isPending}
+                                      className={`btn-secondary py-1 px-2.5 text-xs ${!q.disabled ? 'text-destructive hover:bg-destructive/10' : 'text-emerald-400 hover:bg-emerald-500/10'}`}
+                                      title={!q.disabled ? 'Deshabilitar cola' : 'Habilitar cola'}
+                                    >
+                                      {!q.disabled ? 'Suspender' : 'Activar'}
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           )}
@@ -965,6 +1148,80 @@ export function RouterProfilePage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Cambiar Plan en Tiempo Real ── */}
+      {selectedQueue && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card w-full max-w-md mx-4 animate-fade-in border border-border/50">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <Sliders className="w-5 h-5 text-brand-400" />
+                Cambiar Plan en Caliente
+              </h2>
+              <button
+                type="button"
+                onClick={() => setSelectedQueue(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 font-sans">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Estás cambiando el plan del cliente <strong>{selectedQueue.cliente_nombre}</strong> con IP <strong>{selectedQueue.target}</strong>. El límite de velocidad de MikroTik se modificará inmediatamente.
+              </p>
+
+              <div>
+                <span className="block text-xs text-muted-foreground">Plan Actual</span>
+                <span className="text-sm font-semibold text-foreground block">{selectedQueue.plan_activo?.nombre || 'Ninguno'}</span>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1.5 font-sans">
+                  Seleccionar Nuevo Plan *
+                </label>
+                <select
+                  value={selectedPlanId}
+                  onChange={(e) => setSelectedPlanId(e.target.value)}
+                  className="input-field cursor-pointer"
+                >
+                  <option value="">-- Seleccionar Plan --</option>
+                  {plans.map((p: any) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre} ({p.velocidad_down_mbps} Mbps desc. / {p.velocidad_up_mbps} Mbps sub.) - ${p.precio}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedQueue(null)}
+                  className="btn-secondary flex-1 justify-center"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    if (!selectedPlanId) return
+                    changePlanMutation.mutate({
+                      clientId: selectedQueue.cliente_id,
+                      planId: selectedPlanId
+                    })
+                  }}
+                  disabled={changePlanMutation.isPending || !selectedPlanId}
+                  className="btn-primary flex-1 justify-center"
+                >
+                  {changePlanMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {changePlanMutation.isPending ? 'Cambiando...' : 'Confirmar'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
