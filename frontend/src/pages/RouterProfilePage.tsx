@@ -250,13 +250,8 @@ export function RouterProfilePage() {
     }
   }, [importingOpen])
 
-
-
-  // Estados de Monitoreo de Tráfico en Tiempo Real
-  const [liveTrafficMap, setLiveTrafficMap] = useState<Record<string, any[]>>({})
+  // Ranking en vivo de clientes por consumo total
   const [liveClients, setLiveClients] = useState<any[]>([])
-  const [availableInterfaces, setAvailableInterfaces] = useState<string[]>([])
-  const [selectedInterface, setSelectedInterface] = useState<string>('ether1')
 
   useEffect(() => {
     const wsUrl = (() => {
@@ -279,40 +274,11 @@ export function RouterProfilePage() {
     ws.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data)
-        const timestamp = payload.timestamp
-
-        // 1. Interfaces
-        const ifaces = payload.interfaces || []
-        const ifaceNames = ifaces.map((i: any) => i.name)
-        setAvailableInterfaces((prev) => {
-          if (JSON.stringify(prev) !== JSON.stringify(ifaceNames)) {
-            return ifaceNames
-          }
-          return prev
-        })
-
-        setLiveTrafficMap((prev) => {
-          const updated = { ...prev }
-          for (const iface of ifaces) {
-            const points = updated[iface.name] || []
-            const newPoint = {
-              timestamp,
-              rx_rate: iface.rx_rate,
-              tx_rate: iface.tx_rate,
-            }
-            const nextPoints = [...points, newPoint]
-            updated[iface.name] = nextPoints.length > 30 ? nextPoints.slice(nextPoints.length - 30) : nextPoints
-          }
-          return updated
-        })
-
-        // 2. Clientes
         const clients = payload.clients || []
         const sortedClients = [...clients].sort((a: any, b: any) => (b.rx_rate + b.tx_rate) - (a.rx_rate + a.tx_rate))
         setLiveClients(sortedClients)
-
       } catch (err) {
-        console.error("Error al procesar mensaje de tráfico en vivo:", err)
+        console.error('Error al procesar mensaje de tráfico en vivo:', err)
       }
     }
 
@@ -320,6 +286,8 @@ export function RouterProfilePage() {
       ws.close()
     }
   }, [id])
+
+
 
   // Consultar información del Router
   const { data: router, isLoading: isLoadingRouter, isError: isErrorRouter, refetch: refetchRouter } = useQuery({
@@ -647,20 +615,12 @@ export function RouterProfilePage() {
                 <span className="text-sm text-foreground font-medium">{router.usuario_api}</span>
               </div>
 
-              {router.ros_version && (
-                <div>
-                  <span className="block text-xs text-muted-foreground">Versión RouterOS</span>
-                  <span className="text-sm text-foreground font-mono font-medium">{router.ros_version}</span>
-                </div>
-              )}
-
               {router.uptime && (
                 <div>
                   <span className="block text-xs text-muted-foreground">Tiempo Activo (Uptime)</span>
                   <span className="text-sm text-foreground font-medium">{formatUptime(router.uptime)}</span>
                 </div>
               )}
-
             </div>
           </div>
 
@@ -774,48 +734,6 @@ export function RouterProfilePage() {
                 )}
               </div>
             )}
-          </div>
-
-          {/* Monitoreo de Interfaces en Tiempo Real */}
-          <div className="glass-card p-5 border border-border/40 space-y-4 font-sans">
-            <div className="flex items-center justify-between border-b border-border/40 pb-2.5">
-              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Activity className="w-4 h-4 text-cyan-400" />
-                Monitoreo de Interfaces en Tiempo Real
-              </h3>
-
-              {availableInterfaces.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Interfaz:</span>
-                  <select
-                    value={selectedInterface}
-                    onChange={(e) => setSelectedInterface(e.target.value)}
-                    className="bg-secondary/60 text-foreground text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-border/40 outline-none focus:border-brand-500/50 transition-all cursor-pointer"
-                  >
-                    {availableInterfaces.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            <div className="h-[250px] w-full relative">
-              {Object.keys(liveTrafficMap).length === 0 || !liveTrafficMap[selectedInterface] || liveTrafficMap[selectedInterface].length === 0 ? (
-                <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin text-brand-400" />
-                  Esperando datos en vivo del colector... (cada 5s)
-                </div>
-              ) : (
-                <TrafficChart
-                  data={liveTrafficMap[selectedInterface]}
-                  range="live"
-                  height={240}
-                />
-              )}
-            </div>
           </div>
         </div>
 
@@ -1010,6 +928,7 @@ export function RouterProfilePage() {
                   </div>
                 )}
               </div>
+
             </div>
           )}
 

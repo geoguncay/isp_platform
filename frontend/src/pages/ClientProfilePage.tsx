@@ -5,8 +5,8 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowLeft, RefreshCw, MapPin, Phone, CreditCard, Shield,
-  Wifi, Calendar, CheckCircle2, XCircle, Sliders, AlertCircle, Loader2, X, Mail, Plus, MessageSquare, Activity,
+  ArrowLeft, RefreshCw, MapPin, Phone, Shield,
+  Wifi, Calendar, CheckCircle2, XCircle, AlertCircle, Loader2, X, Mail, Plus, MessageSquare,
   Edit2, Trash2, FileText, Download, UploadCloud
 } from 'lucide-react'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'

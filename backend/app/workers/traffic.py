@@ -21,6 +21,8 @@ from app.services.mikrotik.router_pool import router_pool
 
 logger = logging.getLogger(__name__)
 
+POLL_TRAFFIC_ROUTER_TIMEOUT_SECONDS = 4.5
+
 
 def ensure_partition_exists(db: Session, dt: datetime) -> str:
     """
@@ -214,6 +216,8 @@ def poll_traffic():
             logger.debug("No hay routers activos para monitorear.")
             return
 
+        logger.info(f"poll_traffic: iniciando recolección para {len(routers)} routers activos")
+
         # Cargar mapa de IPs estáticas de clientes activos para relacionar muestras
         # Filtramos clientes activos que tengan IP estática
         static_ips = (
@@ -243,24 +247,34 @@ def poll_traffic():
                 tasks = []
                 for r in routers:
                     # Correr en un hilo separado de forma no bloqueante
-                    task = loop.run_in_executor(
-                        None, sync_poll_router, r, static_ips_map, now
+                    task = asyncio.wait_for(
+                        loop.run_in_executor(None, sync_poll_router, r, static_ips_map, now),
+                        timeout=POLL_TRAFFIC_ROUTER_TIMEOUT_SECONDS,
                     )
                     tasks.append(task)
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 
                 db_records = []
+                published_clients = 0
+                published_interfaces = 0
                 
                 for r, result in zip(routers, results):
                     if isinstance(result, Exception):
-                        logger.error(f"Error colectando tráfico en router {r.nombre}: {result}")
+                        if isinstance(result, asyncio.TimeoutError):
+                            logger.warning(
+                                f"Timeout colectando tráfico en router {r.nombre} tras {POLL_TRAFFIC_ROUTER_TIMEOUT_SECONDS}s"
+                            )
+                        else:
+                            logger.error(f"Error colectando tráfico en router {r.nombre}: {result}")
                         continue
 
                     client_samples, interface_samples = result
+                    published_clients += len(client_samples)
 
                     # Enriquecer interfaces con tasas bps calculadas
                     enriched_ifaces = await calculate_interface_rates(r.id, interface_samples, now, local_redis)
+                    published_interfaces += len(enriched_ifaces)
 
                     # Guardar en base de datos
                     for cs in client_samples:
@@ -287,7 +301,7 @@ def poll_traffic():
                             timestamp=now,
                         ))
 
-                    # Publicar actualización en vivo a Redis Pub/Sub
+                    # Publicar actualización en vivo a Redis Pub/Sub por router
                     pub_payload = {
                         "router_id": str(r.id),
                         "timestamp": now.isoformat(),
@@ -311,19 +325,26 @@ def poll_traffic():
                                 "tx_rate": ifs["tx_rate"],
                             }
                             for ifs in enriched_ifaces
-                        ]
+                        ],
                     }
-                    
-                    await local_redis.publish(
-                        f"router_traffic:{r.id}", 
-                        json.dumps(pub_payload)
-                    )
+
+                    try:
+                        await local_redis.publish(
+                            f"router_traffic:{r.id}",
+                            json.dumps(pub_payload)
+                        )
+                    except Exception as publish_err:
+                        logger.error(f"Error publicando tráfico en Redis para {r.nombre}: {publish_err}")
 
                 # Insertar todas las muestras recolectadas de una sola vez
                 if db_records:
                     db.bulk_save_objects(db_records)
                     db.commit()
                     logger.info(f"Muestras de tráfico guardadas: {len(db_records)} registros.")
+
+                logger.info(
+                    f"poll_traffic: publicado tick con {published_clients} muestras de clientes y {published_interfaces} de interfaces"
+                )
             finally:
                 await local_redis.aclose()
 

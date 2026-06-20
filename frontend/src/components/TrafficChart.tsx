@@ -27,6 +27,24 @@ export const formatSpeed = (bps: number) => {
   return `${bps.toFixed(0)} bps`
 }
 
+const YAxisTick = ({ x, y, payload }: any) => {
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        x={0}
+        y={0}
+        dy={3}
+        textAnchor="end"
+        fill="rgba(255, 255, 255, 0.45)"
+        fontSize={9}
+        fontFamily="monospace"
+      >
+        <tspan>{formatSpeed(Number(payload.value))}</tspan>
+      </text>
+    </g>
+  )
+}
+
 export default function TrafficChart({ data, range, height = 300 }: TrafficChartProps) {
   const formatXAxis = (tick: any) => {
     try {
@@ -111,7 +129,7 @@ export default function TrafficChart({ data, range, height = 300 }: TrafficChart
         <ResponsiveContainer>
           <AreaChart
             data={data}
-            margin={{ top: 20, right: 10, left: -20, bottom: 0 }}
+            margin={{ top: 20, right: 10, left: 0, bottom: 0 }}
           >
             <defs>
               <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
@@ -141,9 +159,11 @@ export default function TrafficChart({ data, range, height = 300 }: TrafficChart
             />
 
             <YAxis
+              width={72}
               tickFormatter={formatSpeed}
+              tick={<YAxisTick />}
+              tickMargin={8}
               stroke="rgba(255, 255, 255, 0.3)"
-              tick={{ fontSize: 9, fill: 'rgba(255, 255, 255, 0.45)', fontFamily: 'monospace' }}
               tickLine={false}
               axisLine={false}
               dx={-4}
