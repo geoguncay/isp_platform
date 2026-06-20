@@ -31,6 +31,13 @@ class Router(Base):
     control_velocidad: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sincronizar_logs: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notificaciones_alertas: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    
+    # Nuevos campos de colas y firewall MikroTik
+    cola_padre: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    address_list: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ancho_banda_up: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    ancho_banda_down: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

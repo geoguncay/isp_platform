@@ -51,6 +51,23 @@ async def list_routers(db: DBSession, _: CurrentUser) -> list:
 
 @router.post("", response_model=RouterRead, status_code=status.HTTP_201_CREATED)
 def create_router(payload: RouterCreate, db: DBSession, _: AdminOnly) -> Router:
+    # 1. Determinar y sanear nombres de cola padre y address list
+    nombre_limpio = payload.nombre.strip().lower().replace(" ", "_")
+    import re
+    nombre_limpio = re.sub(r'[^a-z0-9_-]', '', nombre_limpio)
+    
+    cola_padre_name = payload.cola_padre
+    if not cola_padre_name:
+        cola_padre_name = f"isp_padre_{nombre_limpio}"
+    elif not cola_padre_name.startswith("isp_"):
+        cola_padre_name = f"isp_{cola_padre_name}"
+
+    address_list_name = payload.address_list
+    if not address_list_name:
+        address_list_name = f"isp_clientes_{nombre_limpio}"
+    elif not address_list_name.startswith("isp_"):
+        address_list_name = f"isp_{address_list_name}"
+
     r = Router(
         nombre=payload.nombre,
         ip=payload.ip,
@@ -66,10 +83,26 @@ def create_router(payload: RouterCreate, db: DBSession, _: AdminOnly) -> Router:
         control_velocidad=payload.control_velocidad,
         sincronizar_logs=payload.sincronizar_logs,
         notificaciones_alertas=payload.notificaciones_alertas,
+        cola_padre=cola_padre_name,
+        address_list=address_list_name,
+        ancho_banda_up=payload.ancho_banda_up or 0,
+        ancho_banda_down=payload.ancho_banda_down or 0,
     )
     db.add(r)
     db.commit()
     db.refresh(r)
+
+    # 2. Sincronizar cola padre en MikroTik si está activo
+    if r.control_velocidad:
+        from app.services.mikrotik.queue import sync_router_parent_queue
+        try:
+            sync_router_parent_queue(r)
+        except Exception as e:
+            # Registrar error pero no cancelar la creación en base de datos
+            import logging
+            logging.getLogger(__name__).error(f"No se pudo crear cola padre en MikroTik para el router: {e}")
+            pass
+
     return r
 
 
@@ -147,6 +180,9 @@ def update_router(
     if not r:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Router no encontrado")
 
+    # Guardar el nombre anterior de la cola padre antes de actualizar
+    old_cola_padre = r.cola_padre
+
     update_data = payload.model_dump(exclude_unset=True)
     if "password_api" in update_data:
         update_data["password_enc"] = encrypt_secret(update_data.pop("password_api"))
@@ -154,8 +190,37 @@ def update_router(
     for field, value in update_data.items():
         setattr(r, field, value)
 
+    # Saneamiento manual si cambian nombres
+    if "nombre" in update_data and (not r.cola_padre or not r.address_list):
+        nombre_limpio = r.nombre.strip().lower().replace(" ", "_")
+        import re
+        nombre_limpio = re.sub(r'[^a-z0-9_-]', '', nombre_limpio)
+        if not r.cola_padre:
+            r.cola_padre = f"isp_padre_{nombre_limpio}"
+        if not r.address_list:
+            r.address_list = f"isp_clientes_{nombre_limpio}"
+
+    if "cola_padre" in update_data and r.cola_padre:
+        if not r.cola_padre.startswith("isp_"):
+            r.cola_padre = f"isp_{r.cola_padre}"
+
+    if "address_list" in update_data and r.address_list:
+        if not r.address_list.startswith("isp_"):
+            r.address_list = f"isp_{r.address_list}"
+
     db.commit()
     db.refresh(r)
+
+    # Sincronizar cola padre en MikroTik si el control de velocidad está activo
+    if r.control_velocidad:
+        from app.services.mikrotik.queue import sync_router_parent_queue
+        try:
+            sync_router_parent_queue(r, old_parent_name=old_cola_padre)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"No se pudo actualizar la cola padre en MikroTik para el router: {e}")
+            pass
+
     return r
 
 

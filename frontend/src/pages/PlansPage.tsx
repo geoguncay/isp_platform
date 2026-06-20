@@ -44,8 +44,6 @@ const planSchema = z.object({
   burst_threshold_down_kbps: z.coerce.number().min(0).optional().nullable().or(z.literal('').transform(() => null)),
   burst_threshold_up_kbps: z.coerce.number().min(0).optional().nullable().or(z.literal('').transform(() => null)),
   prioridad: z.coerce.number().min(1).max(8).default(8).optional().nullable(),
-  address_list: z.string().max(100).optional().nullable().or(z.literal('')),
-  parent: z.string().max(100).optional().nullable().or(z.literal('')),
 })
 
 type PlanFormData = z.infer<typeof planSchema>
@@ -137,8 +135,6 @@ export function PlansPage() {
       burst_threshold_down_kbps: null,
       burst_threshold_up_kbps: null,
       prioridad: 8,
-      address_list: 'clientes',
-      parent: 'PADRE',
     })
     setDialogOpen(true)
   }
@@ -158,8 +154,6 @@ export function PlansPage() {
       burst_threshold_down_kbps: plan.burst_threshold_down_kbps,
       burst_threshold_up_kbps: plan.burst_threshold_up_kbps,
       prioridad: plan.prioridad || 8,
-      address_list: plan.address_list || '',
-      parent: plan.parent || '',
     })
     setDialogOpen(true)
   }
@@ -468,39 +462,19 @@ export function PlansPage() {
                     </div>
                   </div>
 
-                  {/* Prioridad, Address List & Parent */}
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-1">
-                      <label className="block text-xs font-medium text-foreground mb-1.5">Prioridad</label>
-                      <select
-                        {...register('prioridad')}
-                        className="input-field text-sm"
-                      >
-                        {[1, 2, 3, 4, 5, 6, 7, 8].map((prio) => (
-                          <option key={prio} value={prio} className="bg-background text-foreground">
-                            {prio} {prio === 8 ? '(Mín)' : prio === 1 ? '(Máx)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="col-span-1">
-                      <label className="block text-xs font-medium text-foreground mb-1.5">Address List</label>
-                      <input
-                        type="text"
-                        placeholder="clientes"
-                        {...register('address_list')}
-                        className="input-field text-sm"
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <label className="block text-xs font-medium text-foreground mb-1.5">Cola Padre</label>
-                      <input
-                        type="text"
-                        placeholder="PADRE"
-                        {...register('parent')}
-                        className="input-field text-sm"
-                      />
-                    </div>
+                  {/* Prioridad */}
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1.5">Prioridad</label>
+                    <select
+                      {...register('prioridad')}
+                      className="input-field text-sm"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8].map((prio) => (
+                        <option key={prio} value={prio} className="bg-background text-foreground">
+                          {prio} {prio === 8 ? '(Mín)' : prio === 1 ? '(Máx)' : ''}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>

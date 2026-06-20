@@ -88,6 +88,53 @@ def update_plan(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Ya existe un plan con el nombre: {payload.nombre}",
         )
+
+    # Propagar los cambios de velocidad y nombre del plan en cascada a MikroTik
+    active_client_plans = (
+        db.query(ClientPlan)
+        .filter(ClientPlan.plan_id == plan_id, ClientPlan.estado == "activo")
+        .all()
+    )
+
+    for cp in active_client_plans:
+        client = cp.client
+        if client and client.activo and client.tipo == "static" and client.static_ip and client.router:
+            try:
+                from app.services.mikrotik.address_list import sync_ip_in_address_list, get_clean_list_name
+                from app.services.mikrotik.queue import sync_client_queue, get_clean_parent_name
+
+                addr_list_name = get_clean_list_name(client.router.address_list or p.address_list)
+
+                # Sincronizar address-list
+                sync_ip_in_address_list(
+                    client.router,
+                    client.static_ip.ip,
+                    client.nombre,
+                    list_name=addr_list_name
+                )
+
+                # Sincronizar cola en MikroTik con los datos actualizados del plan
+                sync_client_queue(
+                    router=client.router,
+                    client_name=client.nombre,
+                    ip=client.static_ip.ip,
+                    speed_up=p.velocidad_up_kbps,
+                    speed_down=p.velocidad_down_kbps,
+                    plan_name=p.nombre,
+                    limit_at_up=p.limit_at_up_kbps,
+                    limit_at_down=p.limit_at_down_kbps,
+                    burst_threshold_up=p.burst_threshold_up_kbps,
+                    burst_threshold_down=p.burst_threshold_down_kbps,
+                    prioridad=p.prioridad,
+                    parent=get_clean_parent_name(client.router.cola_padre or p.parent),
+                )
+            except Exception as e:
+                # Registrar error, pero no cancelar la actualización del plan comercial general
+                import logging
+                logging.getLogger(__name__).error(
+                    f"Fallo al sincronizar en cascada en MikroTik para cliente {client.id} tras actualizar plan {p.nombre}: {e}"
+                )
+
     return p
 
 

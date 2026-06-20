@@ -27,6 +27,13 @@ class RouterCreate(BaseModel):
     control_velocidad: bool = True
     sincronizar_logs: bool = True
     notificaciones_alertas: bool = True
+    
+    # Nuevos campos de configuración de MikroTik y ancho de banda
+    cola_padre: str | None = Field(default=None, max_length=100)
+    address_list: str | None = Field(default=None, max_length=100)
+    ancho_banda_up: int | None = Field(default=0, ge=0)
+    ancho_banda_down: int | None = Field(default=0, ge=0)
+
 
 
 class RouterUpdate(BaseModel):
@@ -44,6 +51,13 @@ class RouterUpdate(BaseModel):
     control_velocidad: bool | None = None
     sincronizar_logs: bool | None = None
     notificaciones_alertas: bool | None = None
+
+    # Nuevos campos de configuración de MikroTik y ancho de banda
+    cola_padre: str | None = None
+    address_list: str | None = None
+    ancho_banda_up: int | None = None
+    ancho_banda_down: int | None = None
+
 
 
 class RouterRead(BaseModel):
@@ -63,8 +77,16 @@ class RouterRead(BaseModel):
     control_velocidad: bool
     sincronizar_logs: bool
     notificaciones_alertas: bool
+    
+    # Nuevos campos de configuración de MikroTik y ancho de banda
+    cola_padre: str | None
+    address_list: str | None
+    ancho_banda_up: int | None
+    ancho_banda_down: int | None
+
     created_at: datetime
     updated_at: datetime
+
     # Estado dinámico (desde Redis, no desde BD)
     status: str | None = None          # "online" | "offline" | "degraded" | "unknown"
     uptime: str | None = None

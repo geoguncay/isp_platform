@@ -8,4 +8,5 @@ from app.models.static_ip import StaticIP
 from app.models.payment import ClientPayment
 from app.models.ticket import ClientTicket
 from app.models.suspension_log import SuspensionLog
+from app.models.traffic_sample import TrafficSample
 

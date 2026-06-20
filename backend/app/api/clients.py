@@ -22,8 +22,14 @@ from app.services.mikrotik.address_list import (
     remove_ip_from_address_list,
     suspend_ip_in_firewall,
     unsuspend_ip_in_firewall,
+    get_clean_list_name,
 )
-from app.services.mikrotik.queue import sync_client_queue, remove_client_queue, toggle_client_queue
+from app.services.mikrotik.queue import (
+    sync_client_queue,
+    remove_client_queue,
+    toggle_client_queue,
+    get_clean_parent_name,
+)
 from app.services.notifications.twilio_service import send_suspension_notification
 from app.schemas.client import (
     ClientCreate,
@@ -255,7 +261,7 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
         # Sincronizar con MikroTik síncronamente (address-list y cola simple)
         try:
             p = db.get(Plan, payload.plan_id) if payload.plan_id else None
-            addr_list_name = p.address_list if p and p.address_list else "clientes"
+            addr_list_name = get_clean_list_name(r.address_list or (p.address_list if p else None))
             sync_ip_in_address_list(r, payload.ip, client.nombre, list_name=addr_list_name)
             if p:
                 sync_client_queue(
@@ -270,7 +276,7 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
                     burst_threshold_up=p.burst_threshold_up_kbps,
                     burst_threshold_down=p.burst_threshold_down_kbps,
                     prioridad=p.prioridad,
-                    parent=p.parent,
+                    parent=get_clean_parent_name(r.cola_padre or p.parent),
                 )
         except Exception as e:
             db.rollback()
@@ -401,7 +407,7 @@ def update_client(
                     .first()
                 )
                 p = active_client_plan.plan if active_client_plan else None
-                addr_list_name = p.address_list if p and p.address_list else "clientes"
+                addr_list_name = get_clean_list_name(new_router.address_list or (p.address_list if p else None))
                 sync_ip_in_address_list(new_router, ip_val, update_data.get("nombre", client.nombre), list_name=addr_list_name)
                 if p:
                     sync_client_queue(
@@ -416,7 +422,7 @@ def update_client(
                         burst_threshold_up=p.burst_threshold_up_kbps,
                         burst_threshold_down=p.burst_threshold_down_kbps,
                         prioridad=p.prioridad,
-                        parent=p.parent,
+                        parent=get_clean_parent_name(new_router.cola_padre or p.parent),
                     )
             except Exception as e:
                 db.rollback()
@@ -520,7 +526,7 @@ def assign_client_plan(
     # Sincronizar cola en MikroTik si el cliente es estático y tiene IP
     if client.tipo == "static" and client.static_ip:
         try:
-            addr_list_name = plan.address_list if plan.address_list else "clientes"
+            addr_list_name = get_clean_list_name(client.router.address_list or plan.address_list)
             sync_ip_in_address_list(client.router, client.static_ip.ip, client.nombre, list_name=addr_list_name)
             sync_client_queue(
                 router=client.router,
@@ -534,7 +540,7 @@ def assign_client_plan(
                 burst_threshold_up=plan.burst_threshold_up_kbps,
                 burst_threshold_down=plan.burst_threshold_down_kbps,
                 prioridad=plan.prioridad,
-                parent=plan.parent,
+                parent=get_clean_parent_name(client.router.cola_padre or plan.parent),
             )
         except Exception as e:
             raise HTTPException(
@@ -575,7 +581,7 @@ def sync_client_router(client_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -
 
     try:
         p = active_client_plan.plan if active_client_plan else None
-        addr_list_name = p.address_list if p and p.address_list else "clientes"
+        addr_list_name = get_clean_list_name(client.router.address_list or (p.address_list if p else None))
         sync_ip_in_address_list(client.router, client.static_ip.ip, client.nombre, list_name=addr_list_name)
         if p:
             sync_client_queue(
@@ -590,7 +596,7 @@ def sync_client_router(client_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -
                 burst_threshold_up=p.burst_threshold_up_kbps,
                 burst_threshold_down=p.burst_threshold_down_kbps,
                 prioridad=p.prioridad,
-                parent=p.parent,
+                parent=get_clean_parent_name(client.router.cola_padre or p.parent),
             )
         return {"status": "success", "message": "Sincronización de IP y cola exitosa en el router MikroTik."}
     except Exception as e:

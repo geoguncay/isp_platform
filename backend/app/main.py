@@ -7,9 +7,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, routers_api, users, company, clients, plans
+from app.api import auth, routers_api, users, company, clients, plans, traffic_api
 from app.core.config import settings
-from app.core.database import Base, engine
+from app.core.database import Base, engine, run_migrations
 from app.core.seed import run_seed
 
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
     # Crear tablas solo en dev; en prod usar: alembic upgrade head
     if settings.ENVIRONMENT == "development":
         Base.metadata.create_all(bind=engine)
+        run_migrations(engine)
         run_seed()
 
     yield  # La app corre aquí
@@ -59,6 +60,7 @@ app.include_router(routers_api.router, prefix="/api")
 app.include_router(company.router, prefix="/api")
 app.include_router(clients.router, prefix="/api")
 app.include_router(plans.router, prefix="/api")
+app.include_router(traffic_api.router, prefix="/api")
 
 
 @app.get("/api/health", tags=["health"])

@@ -1,7 +1,7 @@
 /**
  * ClientProfilePage — Ficha del cliente, historial de planes, acciones de red y mapa de ubicación GPS.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -15,6 +15,7 @@ import 'leaflet/dist/leaflet.css'
 import api from '@/services/api'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { ClientFormDialog } from '@/components/ClientFormDialog'
+import TrafficChart from '@/components/TrafficChart'
 
 // Icono personalizado SVG de Leaflet para evitar problemas de rutas de Vite
 const markerSvg = `data:image/svg+xml;utf8,${encodeURIComponent(`
@@ -119,14 +120,66 @@ export function ClientProfilePage() {
     }
   })
 
-  // Consultar Consumo de Tráfico
-  const { data: trafficData = null, isLoading: isLoadingTraffic } = useQuery({
-    queryKey: ['client-traffic', id],
+  // Estados y Consultas para Tráfico (En vivo / Histórico)
+  const [trafficRange, setTrafficRange] = useState<'live' | '1h' | '24h' | '7d' | '30d'>('live')
+  const [liveTraffic, setLiveTraffic] = useState<any[]>([])
+
+  const { data: historicalTraffic = null, isLoading: isLoadingHistorical } = useQuery({
+    queryKey: ['client-traffic-historical', id, trafficRange],
     queryFn: async () => {
-      const { data } = await api.get(`/clients/${id}/traffic`)
+      const { data } = await api.get(`/traffic/client/${id}`, {
+        params: { range: trafficRange }
+      })
       return data
-    }
+    },
+    enabled: trafficRange !== 'live'
   })
+
+  useEffect(() => {
+    if (trafficRange !== 'live' || !client?.router_id) return
+
+    const wsUrl = (() => {
+      const token = localStorage.getItem('access_token') || ''
+      const apiHost = import.meta.env.VITE_API_URL
+      let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      let wsHost = window.location.host
+      if (apiHost) {
+        try {
+          const url = new URL(apiHost)
+          wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+          wsHost = url.host
+        } catch {}
+      }
+      return `${wsProtocol}//${wsHost}/api/traffic/ws/${client.router_id}?token=${token}`
+    })()
+
+    const ws = new WebSocket(wsUrl)
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        const timestamp = payload.timestamp
+        const clients = payload.clients || []
+        const mySample = clients.find((c: any) => c.cliente_id === id)
+
+        setLiveTraffic((prev) => {
+          const newPoint = {
+            timestamp,
+            rx_rate: mySample ? mySample.rx_rate : 0,
+            tx_rate: mySample ? mySample.tx_rate : 0,
+          }
+          const nextPoints = [...prev, newPoint]
+          return nextPoints.length > 30 ? nextPoints.slice(nextPoints.length - 30) : nextPoints
+        })
+      } catch (err) {
+        console.error("Error en WebSocket de tráfico de cliente:", err)
+      }
+    }
+
+    return () => {
+      ws.close()
+    }
+  }, [id, client?.router_id, trafficRange])
 
   // Mutación para Registrar Ticket
   const createTicketMutation = useMutation({
@@ -466,74 +519,71 @@ export function ClientProfilePage() {
             <div className="p-5">
 
               {activeTab === 'traffic' && (
-                isLoadingTraffic ? (
-                  <div className="text-center py-6 text-xs text-muted-foreground flex items-center justify-center gap-2">
-                    <RefreshCw className="w-4 h-4 animate-spin" /> Cargando tráfico...
-                  </div>
-                ) : !trafficData ? (
-                  <p className="text-center py-6 text-sm text-muted-foreground">Sin estadísticas de tráfico.</p>
-                ) : (
-                  <div className="space-y-6 font-sans">
-                    <div className="border-b border-border/40 pb-3">
-                      <p className="text-xs text-muted-foreground mt-0.5">Muestra el volumen total de descarga y subida de los últimos 6 meses</p>
+                <div className="space-y-6 font-sans animate-fade-in">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-border/40 pb-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">Consumo de Ancho de Banda</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Monitoreo en tiempo real del tráfico de subida y bajada del cliente.
+                      </p>
                     </div>
 
-                    {/* Chart Container */}
-                    <div className="bg-secondary/10 p-5 rounded-xl border border-border/40 space-y-4">
-                      {/* Legends */}
-                      <div className="flex justify-end gap-4 text-xs text-muted-foreground font-semibold px-2 mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="w-3 h-3 bg-gradient-to-br from-blue-500 to-indigo-600 rounded"></span> Descarga (Downlink)
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="w-3 h-3 bg-gradient-to-br from-purple-500 to-pink-600 rounded"></span> Subida (Uplink)
-                        </div>
-                      </div>
-
-                      {/* Bar Grid */}
-                      <div className="grid grid-cols-6 gap-2 sm:gap-4 h-48 items-end border-b border-border/50 pb-2.5 pt-4">
-                        {trafficData.history.map((h: any) => {
-                          const maxVal = 350
-                          const downPct = Math.min((h.consumo_down_gb / maxVal) * 100, 100)
-                          const upPct = Math.min((h.consumo_up_gb / maxVal) * 100, 100)
-                          return (
-                            <div key={h.mes} className="flex flex-col items-center h-full justify-end group">
-                              <div className="flex items-end gap-1 w-full justify-center h-full max-h-[140px]">
-                                {/* Down Bar */}
-                                <div
-                                  className="w-3 sm:w-5 bg-gradient-to-t from-blue-600 to-indigo-400 rounded-t hover:brightness-110 transition-all relative group-hover:scale-y-105 origin-bottom"
-                                  style={{ height: `${downPct}%` }}
-                                  title={`Descarga: ${h.consumo_down_gb} GB`}
-                                >
-                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] rounded px-1 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none mb-1 font-mono whitespace-nowrap shadow z-20">
-                                    {h.consumo_down_gb} GB
-                                  </div>
-                                </div>
-                                {/* Up Bar */}
-                                <div
-                                  className="w-3 sm:w-5 bg-gradient-to-t from-purple-600 to-pink-400 rounded-t hover:brightness-110 transition-all relative group-hover:scale-y-105 origin-bottom"
-                                  style={{ height: `${upPct}%` }}
-                                  title={`Subida: ${h.consumo_up_gb} GB`}
-                                >
-                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] rounded px-1 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none mb-1 font-mono whitespace-nowrap shadow z-20">
-                                    {h.consumo_up_gb} GB
-                                  </div>
-                                </div>
-                              </div>
-                              <span className="text-[10px] text-muted-foreground mt-2 font-medium capitalize">{h.mes.substring(0, 3)}</span>
-                            </div>
-                          )
-                        })}
-                      </div>
-
-                      {/* Scale Indicators */}
-                      <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-                        <span>0 GB</span>
-                        <span>Escala máx: 350 GB</span>
-                      </div>
+                    {/* Selector de Rango */}
+                    <div className="flex bg-secondary/30 p-0.5 rounded-lg border border-border/40">
+                      {[
+                        { id: 'live', label: 'En Vivo' },
+                        { id: '1h', label: '1 Hora' },
+                        { id: '24h', label: '24 Horas' },
+                        { id: '7d', label: '7 Días' },
+                        { id: '30d', label: '30 Días' },
+                      ].map((r) => (
+                        <button
+                          key={r.id}
+                          onClick={() => {
+                            setTrafficRange(r.id as any)
+                            if (r.id === 'live') {
+                              setLiveTraffic([])
+                            }
+                          }}
+                          className={`text-xs px-3 py-1.5 rounded-md font-medium transition-all ${
+                            trafficRange === r.id
+                              ? 'bg-primary text-primary-foreground shadow'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {r.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                )
+
+                  {trafficRange === 'live' ? (
+                    <div className="bg-secondary/10 p-5 rounded-xl border border-border/40 min-h-[300px]">
+                      {liveTraffic.length === 0 ? (
+                        <div className="h-[300px] flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                          <RefreshCw className="w-5 h-5 animate-spin text-primary" />
+                          <p className="text-xs font-medium">Esperando datos del colector...</p>
+                        </div>
+                      ) : (
+                        <TrafficChart data={liveTraffic} range="live" height={300} />
+                      )}
+                    </div>
+                  ) : isLoadingHistorical ? (
+                    <div className="bg-secondary/10 p-5 rounded-xl border border-border/40 h-[340px] flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                      <RefreshCw className="w-5 h-5 animate-spin text-primary" />
+                      <p className="text-xs font-medium">Cargando datos históricos...</p>
+                    </div>
+                  ) : !historicalTraffic || !historicalTraffic.samples || historicalTraffic.samples.length === 0 ? (
+                    <div className="bg-secondary/10 p-5 rounded-xl border border-border/40 h-[340px] flex flex-col items-center justify-center text-muted-foreground text-center">
+                      <p className="text-sm font-medium">No se encontraron estadísticas de tráfico para el rango seleccionado.</p>
+                      <p className="text-xs text-muted-foreground mt-1">El colector podría no tener suficientes datos almacenados.</p>
+                    </div>
+                  ) : (
+                    <div className="bg-secondary/10 p-5 rounded-xl border border-border/40 min-h-[300px]">
+                      <TrafficChart data={historicalTraffic.samples} range={trafficRange} height={300} />
+                    </div>
+                  )}
+                </div>
               )}
 
               {activeTab === 'payments' && (

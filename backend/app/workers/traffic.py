@@ -1,0 +1,336 @@
+"""
+Tarea Celery: colector de tráfico y monitoreo periódico en tiempo real.
+"""
+import asyncio
+import logging
+from datetime import datetime, timezone
+import json
+import uuid
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.core import database
+from app.models.router import Router
+from app.models.static_ip import StaticIP
+from app.models.client import Client
+from app.models.traffic_sample import TrafficSample
+from app.core.redis import redis_client
+from app.workers.celery_app import celery_app
+from app.services.mikrotik.router_pool import router_pool
+
+logger = logging.getLogger(__name__)
+
+
+def ensure_partition_exists(db: Session, dt: datetime) -> str:
+    """
+    Asegura que exista la partición de PostgreSQL para el mes correspondiente.
+    Retorna el nombre de la partición. En SQLite no realiza ninguna acción.
+    """
+    if db.bind.dialect.name == "sqlite":
+        return "traffic_samples"
+
+    partition_name = f"traffic_samples_y{dt.year}m{dt.month:02d}"
+    start_date = f"{dt.year}-{dt.month:02d}-01"
+    
+    # Calcular siguiente mes
+    next_month = dt.month + 1
+    next_year = dt.year
+    if next_month > 12:
+        next_month = 1
+        next_year += 1
+    end_date = f"{next_year}-{next_month:02d}-01"
+
+    query = f"""
+    CREATE TABLE IF NOT EXISTS {partition_name} 
+    PARTITION OF traffic_samples 
+    FOR VALUES FROM ('{start_date}') TO ('{end_date}');
+    """
+    try:
+        db.execute(text(query))
+        db.commit()
+        logger.debug(f"Partición de base de datos verificada: {partition_name}")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error al crear partición {partition_name}: {e}")
+    return partition_name
+
+
+def sync_poll_router(router: Router, static_ips_map: dict, now: datetime) -> tuple[list[dict], list[dict]]:
+    """
+    Consulta síncrona a un router MikroTik para obtener Simple Queues e Interfaces.
+    Diseñado para ejecutarse concurridamente en un hilo separado.
+    """
+    client_samples = []
+    interface_samples = []
+
+    try:
+        with router_pool.connect_to(router) as api:
+            # 1. Obtener Simple Queues (Tráfico de Clientes)
+            try:
+                queues = list(api.path('/queue/simple'))
+                for q in queues:
+                    name = q.get("name")
+                    target = q.get("target")  # e.g., "192.168.10.15/32"
+                    rate_str = q.get("rate", "0/0")  # e.g., "128000/256000"
+                    bytes_str = q.get("bytes", "0/0")  # e.g., "12345/67890"
+                    disabled = q.get("disabled") == "true" or q.get("disabled") is True
+
+                    if not target or disabled:
+                        continue
+
+                    # Extraer dirección IP (ej: de "192.168.10.15/32" -> "192.168.10.15")
+                    ip = target.split('/')[0]
+                    client_id = static_ips_map.get((router.id, ip))
+
+                    if not client_id:
+                        continue
+
+                    # Parsear tasas (Simple Queues en MikroTik reporta: upload/download)
+                    try:
+                        tx_rate, rx_rate = map(int, rate_str.split('/'))
+                    except ValueError:
+                        tx_rate, rx_rate = 0, 0
+
+                    try:
+                        tx_bytes, rx_bytes = map(int, bytes_str.split('/'))
+                    except ValueError:
+                        tx_bytes, rx_bytes = 0, 0
+
+                    client_samples.append({
+                        "router_id": router.id,
+                        "cliente_id": client_id,
+                        "nombre": name,
+                        "rx_bytes": rx_bytes,
+                        "tx_bytes": tx_bytes,
+                        "rx_rate": rx_rate,
+                        "tx_rate": tx_rate,
+                        "timestamp": now,
+                    })
+            except Exception as eq:
+                logger.error(f"Error al consultar colas en {router.nombre}: {eq}")
+
+            # 2. Obtener Interfaces (Consumo Global)
+            try:
+                iface_list = list(api("/interface/print"))
+                for iface in iface_list[:20]:  # Máximo 20 interfaces para optimizar
+                    name = iface.get("name")
+                    running = iface.get("running") == "true"
+                    disabled = iface.get("disabled") == "true"
+                    rx_bytes = int(iface.get("rx-byte", 0) or 0)
+                    tx_bytes = int(iface.get("tx-byte", 0) or 0)
+
+                    if disabled or not running:
+                        continue
+
+                    interface_samples.append({
+                        "router_id": router.id,
+                        "interface_name": name,
+                        "rx_bytes": rx_bytes,
+                        "tx_bytes": tx_bytes,
+                        "timestamp": now,
+                    })
+            except Exception as ei:
+                logger.error(f"Error al consultar interfaces en {router.nombre}: {ei}")
+
+    except Exception as e:
+        logger.error(f"Fallo de conexión al colectar tráfico en router {router.nombre}: {e}")
+        return [], []
+
+    return client_samples, interface_samples
+
+
+async def calculate_interface_rates(router_id: uuid.UUID, interface_samples: list[dict], now: datetime, redis_conn) -> list[dict]:
+    """
+    Calcula la tasa actual en bps para las interfaces basándose en el delta de bytes y tiempo.
+    """
+    enriched_samples = []
+    now_ts = now.timestamp()
+
+    for sample in interface_samples:
+        iface_name = sample["interface_name"]
+        cache_key = f"router:iface_bytes:{router_id}:{iface_name}"
+
+        # Obtener muestra anterior de Redis
+        prev_data_str = await redis_conn.get(cache_key)
+        
+        rx_rate = 0
+        tx_rate = 0
+
+        if prev_data_str:
+            try:
+                prev_data = json.loads(prev_data_str)
+                prev_rx = prev_data["rx_bytes"]
+                prev_tx = prev_data["tx_bytes"]
+                prev_ts = prev_data["ts"]
+
+                time_diff = now_ts - prev_ts
+                if time_diff > 0.1:
+                    diff_rx = sample["rx_bytes"] - prev_rx
+                    diff_tx = sample["tx_bytes"] - prev_tx
+
+                    # Evitar valores negativos si el contador de la interfaz se reinició
+                    if diff_rx >= 0 and diff_tx >= 0:
+                        # Convertir a bits por segundo (bps)
+                        rx_rate = int((diff_rx * 8) / time_diff)
+                        tx_rate = int((diff_tx * 8) / time_diff)
+            except Exception as e:
+                logger.error(f"Error al calcular velocidad de interfaz {iface_name}: {e}")
+
+        # Guardar muestra actual para la siguiente ejecución
+        current_data = {
+            "rx_bytes": sample["rx_bytes"],
+            "tx_bytes": sample["tx_bytes"],
+            "ts": now_ts
+        }
+        await redis_conn.setex(cache_key, 60, json.dumps(current_data))
+
+        sample["rx_rate"] = rx_rate
+        sample["tx_rate"] = tx_rate
+        enriched_samples.append(sample)
+
+    return enriched_samples
+
+
+@celery_app.task(name="app.workers.traffic.poll_traffic")
+def poll_traffic():
+    """
+    Tarea Celery periódica ejecutada cada 5 segundos.
+    1. Asegura la partición de la base de datos para el mes actual.
+    2. Recolecta tráfico en paralelo de todos los routers activos.
+    3. Registra las muestras en la base de datos (PostgreSQL particionado).
+    4. Publica las métricas en tiempo real a Redis Pub/Sub.
+    """
+    db = database.SessionLocal()
+    now = datetime.now(timezone.utc)
+
+    try:
+        # Asegurar partición de este mes
+        ensure_partition_exists(db, now)
+
+        # Cargar routers activos
+        routers = db.query(Router).filter(Router.activo == True).all()
+        if not routers:
+            logger.debug("No hay routers activos para monitorear.")
+            return
+
+        # Cargar mapa de IPs estáticas de clientes activos para relacionar muestras
+        # Filtramos clientes activos que tengan IP estática
+        static_ips = (
+            db.query(StaticIP.router_id, StaticIP.ip, StaticIP.cliente_id)
+            .join(Client, StaticIP.cliente_id == Client.id)
+            .filter(Client.activo == True)
+            .all()
+        )
+        static_ips_map = {
+            (router_id, ip): cliente_id 
+            for router_id, ip, cliente_id in static_ips
+        }
+
+        # Ejecutar recolección en paralelo usando subprocesos/hilos
+        async def _run_async_gathering():
+            import redis.asyncio as aioredis
+            from app.core.config import settings
+
+            local_redis = aioredis.from_url(
+                settings.REDIS_URL,
+                encoding="utf-8",
+                decode_responses=True,
+            )
+
+            try:
+                loop = asyncio.get_running_loop()
+                tasks = []
+                for r in routers:
+                    # Correr en un hilo separado de forma no bloqueante
+                    task = loop.run_in_executor(
+                        None, sync_poll_router, r, static_ips_map, now
+                    )
+                    tasks.append(task)
+
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                db_records = []
+                
+                for r, result in zip(routers, results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Error colectando tráfico en router {r.nombre}: {result}")
+                        continue
+
+                    client_samples, interface_samples = result
+
+                    # Enriquecer interfaces con tasas bps calculadas
+                    enriched_ifaces = await calculate_interface_rates(r.id, interface_samples, now, local_redis)
+
+                    # Guardar en base de datos
+                    for cs in client_samples:
+                        db_records.append(TrafficSample(
+                            id=uuid.uuid4(),
+                            router_id=cs["router_id"],
+                            cliente_id=cs["cliente_id"],
+                            rx_bytes=cs["rx_bytes"],
+                            tx_bytes=cs["tx_bytes"],
+                            rx_rate=cs["rx_rate"],
+                            tx_rate=cs["tx_rate"],
+                            timestamp=now,
+                        ))
+
+                    for ifs in enriched_ifaces:
+                        db_records.append(TrafficSample(
+                            id=uuid.uuid4(),
+                            router_id=ifs["router_id"],
+                            interface_name=ifs["interface_name"],
+                            rx_bytes=ifs["rx_bytes"],
+                            tx_bytes=ifs["tx_bytes"],
+                            rx_rate=ifs["rx_rate"],
+                            tx_rate=ifs["tx_rate"],
+                            timestamp=now,
+                        ))
+
+                    # Publicar actualización en vivo a Redis Pub/Sub
+                    pub_payload = {
+                        "router_id": str(r.id),
+                        "timestamp": now.isoformat(),
+                        "clients": [
+                            {
+                                "cliente_id": str(cs["cliente_id"]),
+                                "nombre": cs["nombre"],
+                                "rx_bytes": cs["rx_bytes"],
+                                "tx_bytes": cs["tx_bytes"],
+                                "rx_rate": cs["rx_rate"],
+                                "tx_rate": cs["tx_rate"],
+                            }
+                            for cs in client_samples
+                        ],
+                        "interfaces": [
+                            {
+                                "name": ifs["interface_name"],
+                                "rx_bytes": ifs["rx_bytes"],
+                                "tx_bytes": ifs["tx_bytes"],
+                                "rx_rate": ifs["rx_rate"],
+                                "tx_rate": ifs["tx_rate"],
+                            }
+                            for ifs in enriched_ifaces
+                        ]
+                    }
+                    
+                    await local_redis.publish(
+                        f"router_traffic:{r.id}", 
+                        json.dumps(pub_payload)
+                    )
+
+                # Insertar todas las muestras recolectadas de una sola vez
+                if db_records:
+                    db.bulk_save_objects(db_records)
+                    db.commit()
+                    logger.info(f"Muestras de tráfico guardadas: {len(db_records)} registros.")
+            finally:
+                await local_redis.aclose()
+
+        # Correr el ciclo asíncrono
+        asyncio.run(_run_async_gathering())
+
+    except Exception as e:
+        logger.error(f"Error general en poll_traffic: {e}", exc_info=True)
+    finally:
+        db.close()

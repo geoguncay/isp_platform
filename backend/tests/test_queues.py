@@ -137,7 +137,7 @@ def test_create_client_creates_queue(mock_sync_queue, mock_sync_ip, client: Test
         burst_threshold_up=None,
         burst_threshold_down=None,
         prioridad=8,
-        parent=None
+        parent="isp_padre"
     )
 
 

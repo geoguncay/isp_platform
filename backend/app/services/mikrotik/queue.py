@@ -9,31 +9,60 @@ from librouteros.query import Key
 logger = logging.getLogger(__name__)
 
 
-def get_or_create_parent_queue(api) -> str:
+def get_clean_parent_name(name: str | None) -> str:
     """
-    Busca o crea una cola simple padre llamada 'PADRE' o 'total'.
-    Retorna el nombre de la cola padre encontrada o creada.
+    Sanea el nombre de la cola simple padre en MikroTik aplicando el prefijo isp_.
+    """
+    if not name:
+        return "isp_padre"
+    name_clean = name.strip()
+    if name_clean.lower() in ("none", ""):
+        return "isp_padre"
+    if name_clean.startswith("isp_"):
+        return name_clean
+    return f"isp_padre_{name_clean}"
+
+
+def get_or_create_parent_queue(api, name: str = "isp_padre") -> str:
+    """
+    Busca o crea una cola simple padre.
+    Si se busca la de defecto (isp_padre), busca también las heredadas (PADRE, total) para retrocompatibilidad.
+    Si una cola padre personalizada no existe, se crea dinámicamente en MikroTik.
     """
     try:
-        # 1. Buscar cola llamada 'PADRE'
-        query_padre = api.path('/queue/simple').select().where(Key('name') == 'PADRE')
-        existing = list(query_padre)
-        if existing:
-            return 'PADRE'
+        # 1. Si es la cola por defecto, buscar también legadas
+        if name == "isp_padre":
+            # Buscar 'isp_padre'
+            query_isp = api.path('/queue/simple').select().where(Key('name') == 'isp_padre')
+            existing_isp = list(query_isp)
+            if existing_isp:
+                return 'isp_padre'
 
-        # 2. Buscar cola llamada 'total'
-        query_total = api.path('/queue/simple').select().where(Key('name') == 'total')
-        existing_total = list(query_total)
-        if existing_total:
-            return 'total'
+            # Buscar 'PADRE'
+            query_padre = api.path('/queue/simple').select().where(Key('name') == 'PADRE')
+            existing = list(query_padre)
+            if existing:
+                return 'PADRE'
 
-        # 3. Si ninguna existe, crear 'PADRE'
-        logger.info("No se encontró cola padre. Creando cola padre 'PADRE' en el router...")
-        list(api("/queue/simple/add", name="PADRE", target="0.0.0.0/0", **{"max-limit": "0/0"}))
-        return 'PADRE'
+            # Buscar 'total'
+            query_total = api.path('/queue/simple').select().where(Key('name') == 'total')
+            existing_total = list(query_total)
+            if existing_total:
+                return 'total'
+
+        else:
+            # Buscar por el nombre exacto de la cola padre custom
+            query_custom = api.path('/queue/simple').select().where(Key('name') == name)
+            existing_custom = list(query_custom)
+            if existing_custom:
+                return name
+
+        # 2. Si no se encontró, crearla con límite ilimitado (0/0)
+        logger.info(f"Cola padre '{name}' no encontrada. Creándola dinámicamente en MikroTik...")
+        list(api("/queue/simple/add", name=name, target="0.0.0.0/0", **{"max-limit": "0/0"}))
+        return name
     except Exception as e:
-        logger.error(f"Error al buscar o crear cola padre: {e}")
-        # En caso de error, retornamos 'none' o vacío para intentar agregar la cola de todas formas sin padre
+        logger.error(f"Error al buscar o crear la cola padre '{name}': {e}")
         return 'none'
 
 
@@ -60,8 +89,9 @@ def sync_client_queue(
 
     try:
         with router_pool.connect_to(router) as api:
-            # Si se especificó una cola padre custom, usarla; si no, buscar/crear la de defecto
-            parent_name = parent.strip() if (parent and parent.strip()) else get_or_create_parent_queue(api)
+            # Sanear y resolver la cola padre
+            clean_parent = get_clean_parent_name(parent)
+            parent_name = get_or_create_parent_queue(api, clean_parent)
             
             # Buscar por target IP
             query_target = api.path('/queue/simple').select().where(Key('target') == target_ip)
@@ -178,13 +208,13 @@ def fetch_queues(router: Router) -> list[dict]:
 
 def update_parent_queue_limit(router: Router, limit_up_mbps: int, limit_down_mbps: int) -> None:
     """
-    Actualiza el límite de la cola simple padre ('PADRE' o 'total').
+    Actualiza el límite de la cola simple padre ('isp_padre', 'PADRE' o 'total').
     Si no existe la cola padre, la crea.
     """
     max_limit = f"{limit_up_mbps}M/{limit_down_mbps}M"
     try:
         with router_pool.connect_to(router) as api:
-            parent_name = get_or_create_parent_queue(api)
+            parent_name = get_or_create_parent_queue(api, "isp_padre")
             # Buscar la cola padre para obtener su id
             query = api.path('/queue/simple').select().where(Key('name') == parent_name)
             existing = list(query)
@@ -193,8 +223,8 @@ def update_parent_queue_limit(router: Router, limit_up_mbps: int, limit_down_mbp
                 list(api("/queue/simple/set", **{".id": entry_id, "max-limit": max_limit}))
                 logger.info(f"Límite de cola padre '{parent_name}' actualizado a {max_limit} en {router.nombre}")
             else:
-                list(api("/queue/simple/add", name="PADRE", target="0.0.0.0/0", **{"max-limit": max_limit}))
-                logger.info(f"Cola padre 'PADRE' creada con límite {max_limit} en {router.nombre}")
+                list(api("/queue/simple/add", name="isp_padre", target="0.0.0.0/0", **{"max-limit": max_limit}))
+                logger.info(f"Cola padre 'isp_padre' creada con límite {max_limit} en {router.nombre}")
     except Exception as e:
         logger.error(f"Error al actualizar límite de cola padre en {router.nombre}: {e}")
         raise e
@@ -202,15 +232,22 @@ def update_parent_queue_limit(router: Router, limit_up_mbps: int, limit_down_mbp
 
 def get_parent_queue_limit(router: Router) -> dict:
     """
-    Obtiene los límites actuales de subida y bajada de la cola simple padre ('PADRE' o 'total').
+    Obtiene los límites actuales de subida y bajada de la cola simple padre ('isp_padre', 'PADRE' o 'total').
     Retorna un diccionario con limit_up y limit_down en Mbps, o None si no tiene límites o no existe.
     """
     try:
         with router_pool.connect_to(router) as api:
-            # Buscar cola llamada 'PADRE'
-            query = api.path('/queue/simple').select().where(Key('name') == 'PADRE')
+            # Buscar cola llamada 'isp_padre'
+            query = api.path('/queue/simple').select().where(Key('name') == 'isp_padre')
             existing = list(query)
+            
             if not existing:
+                # Buscar cola llamada 'PADRE'
+                query_legacy = api.path('/queue/simple').select().where(Key('name') == 'PADRE')
+                existing = list(query_legacy)
+                
+            if not existing:
+                # Buscar cola llamada 'total'
                 query_total = api.path('/queue/simple').select().where(Key('name') == 'total')
                 existing = list(query_total)
             
@@ -237,7 +274,53 @@ def get_parent_queue_limit(router: Router) -> dict:
                     }
                 except Exception:
                     pass
-            return {"name": "PADRE", "limit_up": 0, "limit_down": 0}
+            return {"name": "isp_padre", "limit_up": 0, "limit_down": 0}
     except Exception as e:
         logger.error(f"Error al obtener límites de cola padre en {router.nombre}: {e}")
-        return {"name": "PADRE", "limit_up": 0, "limit_down": 0}
+        return {"name": "isp_padre", "limit_up": 0, "limit_down": 0}
+
+
+def sync_router_parent_queue(router: Router, old_parent_name: str | None = None) -> None:
+    """
+    Crea o actualiza la cola simple padre asociada a este router en MikroTik.
+    Soporta el renombrado de la cola si cambia de nombre para evitar duplicar recursos.
+    """
+    if not router.control_velocidad:
+        return
+
+    # Si cola_padre no está configurada, usar el default isp_padre
+    parent_name = get_clean_parent_name(router.cola_padre)
+    limit_up = router.ancho_banda_up or 0
+    limit_down = router.ancho_banda_down or 0
+    max_limit = f"{limit_up}M/{limit_down}M" if (limit_up > 0 or limit_down > 0) else "0/0"
+
+    try:
+        with router_pool.connect_to(router) as api:
+            # 1. Si cambió el nombre de la cola padre, renombrar la existente
+            if old_parent_name:
+                clean_old = get_clean_parent_name(old_parent_name)
+                if clean_old != parent_name:
+                    query_old = api.path('/queue/simple').select().where(Key('name') == clean_old)
+                    existing_old = list(query_old)
+                    if existing_old:
+                        entry_id = existing_old[0].get(".id")
+                        list(api("/queue/simple/set", **{".id": entry_id, "name": parent_name, "max-limit": max_limit}))
+                        logger.info(f"Cola padre del router renombrada de '{clean_old}' a '{parent_name}' en {router.nombre}")
+                        return
+
+            # 2. Buscar si ya existe la cola con el nombre nuevo
+            query = api.path('/queue/simple').select().where(Key('name') == parent_name)
+            existing = list(query)
+            if existing:
+                entry_id = existing[0].get(".id")
+                # Si existe, actualizamos su límite
+                list(api("/queue/simple/set", **{".id": entry_id, "max-limit": max_limit}))
+                logger.info(f"Cola padre del router '{parent_name}' actualizada con límite {max_limit} en {router.nombre}")
+            else:
+                # Si no existe, la creamos
+                list(api("/queue/simple/add", name=parent_name, target="0.0.0.0/0", **{"max-limit": max_limit}))
+                logger.info(f"Cola padre del router '{parent_name}' creada con límite {max_limit} en {router.nombre}")
+    except Exception as e:
+        logger.error(f"Error al sincronizar cola padre para el router {router.nombre}: {e}")
+        raise e
+

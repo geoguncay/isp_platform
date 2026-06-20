@@ -44,6 +44,10 @@ const routerSchema = z.object({
   control_velocidad: z.boolean().default(true),
   sincronizar_logs: z.boolean().default(true),
   notificaciones_alertas: z.boolean().default(true),
+  cola_padre: z.string().max(100).optional().nullable(),
+  address_list: z.string().max(100).optional().nullable(),
+  ancho_banda_up: z.coerce.number().min(0).default(0),
+  ancho_banda_down: z.coerce.number().min(0).default(0),
 }).refine(
   (data) => {
     // La contraseña es obligatoria solo si es un router nuevo (no hay id)
@@ -63,14 +67,14 @@ type RouterFormData = z.infer<typeof routerSchema>
 interface RouterFormDialogProps {
   open: boolean
   onClose: () => void
-  router?: { 
-    id: string; 
-    nombre: string; 
-    ip: string; 
-    puerto_api: number; 
-    usuario_api: string; 
-    modelo_hw: string | null; 
-    notas: string | null; 
+  router?: {
+    id: string;
+    nombre: string;
+    ip: string;
+    puerto_api: number;
+    usuario_api: string;
+    modelo_hw: string | null;
+    notas: string | null;
     status?: 'online' | 'offline' | 'degraded' | 'unknown' | null;
     latitud?: number | null;
     longitud?: number | null;
@@ -78,6 +82,10 @@ interface RouterFormDialogProps {
     control_velocidad?: boolean;
     sincronizar_logs?: boolean;
     notificaciones_alertas?: boolean;
+    cola_padre?: string | null;
+    address_list?: string | null;
+    ancho_banda_up?: number | null;
+    ancho_banda_down?: number | null;
   } | null
   onSuccess: () => void
   onDelete?: (id: string) => void
@@ -115,6 +123,10 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
       control_velocidad: true,
       sincronizar_logs: true,
       notificaciones_alertas: true,
+      ancho_banda_up: 0,
+      ancho_banda_down: 0,
+      cola_padre: '',
+      address_list: '',
     },
   })
 
@@ -158,14 +170,18 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
           control_velocidad: router.control_velocidad ?? true,
           sincronizar_logs: router.sincronizar_logs ?? true,
           notificaciones_alertas: router.notificaciones_alertas ?? true,
+          cola_padre: router.cola_padre ?? '',
+          address_list: router.address_list ?? '',
+          ancho_banda_up: router.ancho_banda_up ?? 0,
+          ancho_banda_down: router.ancho_banda_down ?? 0,
         })
       } else {
-        reset({ 
-          id: undefined, 
-          puerto_api: 8728, 
-          nombre: '', 
-          ip: '', 
-          usuario_api: '', 
+        reset({
+          id: undefined,
+          puerto_api: 8728,
+          nombre: '',
+          ip: '',
+          usuario_api: '',
           password_api: '',
           latitud: null,
           longitud: null,
@@ -173,11 +189,30 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
           control_velocidad: true,
           sincronizar_logs: true,
           notificaciones_alertas: true,
+          ancho_banda_up: 0,
+          ancho_banda_down: 0,
+          cola_padre: '',
+          address_list: '',
         })
         handleGetLocation()
       }
     }
   }, [open, router, reset, setValue, handleGetLocation])
+
+  // Lógica reactiva: autocompletar cola padre y address list a partir del nombre del router
+  const nombreVal = watch('nombre')
+  useEffect(() => {
+    if (!isEdit && nombreVal) {
+      const limpio = nombreVal
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_')
+        .replace(/[^a-z0-9_-]/g, '')
+
+      setValue('cola_padre', limpio ? `isp_padre_${limpio}` : '')
+      setValue('address_list', limpio ? `isp_clientes_${limpio}` : '')
+    }
+  }, [nombreVal, isEdit, setValue])
 
   const saveMutation = useMutation({
     mutationFn: async (data: RouterFormData) => {
@@ -294,8 +329,8 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
           <div className="flex items-center w-full max-w-3xl mx-auto justify-between relative">
             {/* Línea de fondo */}
             <div className="absolute top-5 left-0 right-0 h-0.5 bg-border -translate-y-1/2 z-0" />
-            <div 
-              className="absolute top-5 left-0 h-0.5 bg-brand-500 transition-all duration-300 -translate-y-1/2 z-0" 
+            <div
+              className="absolute top-5 left-0 h-0.5 bg-brand-500 transition-all duration-300 -translate-y-1/2 z-0"
               style={{ width: step === 1 ? '0%' : step === 2 ? '50%' : '100%' }}
             />
 
@@ -305,16 +340,14 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
               onClick={() => setStep(1)}
               className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
-                step >= 1 
-                  ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
-                  : 'bg-secondary border-border text-muted-foreground'
-              }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step >= 1
+                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
+                : 'bg-secondary border-border text-muted-foreground'
+                }`}>
                 {step > 1 ? <Check className="w-5 h-5" /> : <Server className="w-5 h-5" />}
               </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
-                step === 1 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-              }`}>
+              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 1 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
+                }`}>
                 1. Información y Ubicación
               </span>
             </button>
@@ -325,16 +358,14 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
               onClick={() => setStep(2)}
               className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
-                step >= 2 
-                  ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
-                  : 'bg-secondary border-border text-muted-foreground'
-              }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step >= 2
+                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
+                : 'bg-secondary border-border text-muted-foreground'
+                }`}>
                 {step > 2 ? <Check className="w-5 h-5" /> : <Key className="w-5 h-5" />}
               </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
-                step === 2 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-              }`}>
+              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 2 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
+                }`}>
                 2. Credenciales y Test
               </span>
             </button>
@@ -345,16 +376,14 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
               onClick={() => setStep(3)}
               className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
-                step === 3 
-                  ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
-                  : 'bg-secondary border-border text-muted-foreground'
-              }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step === 3
+                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
+                : 'bg-secondary border-border text-muted-foreground'
+                }`}>
                 <Activity className="w-5 h-5" />
               </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
-                step === 3 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-              }`}>
+              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 3 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
+                }`}>
                 3. Servicios y Monitoreo
               </span>
             </button>
@@ -642,6 +671,79 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
                 </div>
               </div>
 
+
+              {/* MikroTik: Ancho de Banda y Recursos */}
+              <div className="glass-card p-6 border border-border/60 space-y-5 bg-secondary/10">
+                <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
+                  <Server className="w-4 h-4" /> Recursos y Ancho de Banda (MikroTik)
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+                  {/* Ancho de Banda de Bajada */}
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">
+                      Límite de Bajada de la Cola Padre (Mbps)
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="Ej. 100 (0 = ilimitado)"
+                      {...register('ancho_banda_down')}
+                      className="input-field font-mono"
+                    />
+                    {errors.ancho_banda_down && <p className="text-xs text-destructive mt-1">{errors.ancho_banda_down.message}</p>}
+                  </div>
+
+                  {/* Ancho de Banda de Subida */}
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">
+                      Límite de Subida de la Cola Padre (Mbps)
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="Ej. 50 (0 = ilimitado)"
+                      {...register('ancho_banda_up')}
+                      className="input-field font-mono"
+                    />
+                    {errors.ancho_banda_up && <p className="text-xs text-destructive mt-1">{errors.ancho_banda_up.message}</p>}
+                  </div>
+
+                  {/* Nombre de la Cola Padre */}
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">
+                      Nombre de la Cola Padre
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="isp_PADRE_GLOBAL"
+                      {...register('cola_padre')}
+                      className="input-field font-mono"
+                    />
+                    <span className="text-[10px] text-muted-foreground mt-1 block">
+                      Prefijo obligatorio: <strong>isp_</strong>. Si se omite, se agregará automáticamente.
+                    </span>
+                    {errors.cola_padre && <p className="text-xs text-destructive mt-1">{errors.cola_padre.message}</p>}
+                  </div>
+
+                  {/* Nombre de la Address List de Clientes */}
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">
+                      Nombre de la Address List de Clientes
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="isp_clientes"
+                      {...register('address_list')}
+                      className="input-field font-mono"
+                    />
+                    <span className="text-[10px] text-muted-foreground mt-1 block">
+                      Prefijo obligatorio: <strong>isp_</strong>. Si se omite, se agregará automáticamente.
+                    </span>
+                    {errors.address_list && <p className="text-xs text-destructive mt-1">{errors.address_list.message}</p>}
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {/* Registro de Tráfico y Control de Velocidad */}
                 <div className="glass-card p-5 border border-border/60 space-y-4 bg-secondary/10">
@@ -705,6 +807,7 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
                   </div>
                 </div>
               </div>
+
             </div>
           )}
 
@@ -737,7 +840,7 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
                 </button>
               )}
             </div>
-            
+
             <div className="flex gap-3">
               <button
                 type="button"

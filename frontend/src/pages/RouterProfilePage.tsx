@@ -18,6 +18,7 @@ import { RouterFormDialog } from '@/components/RouterFormDialog'
 import { useAuthStore } from '@/stores/authStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { formatUptime } from '@/lib/utils'
+import TrafficChart, { formatSpeed } from '@/components/TrafficChart'
 
 // Centrado por defecto en Quito, Ecuador
 const DEFAULT_CENTER: [number, number] = [-0.180653, -78.467834]
@@ -240,13 +241,85 @@ export function RouterProfilePage() {
   const [importingOpen, setImportingOpen] = useState(false)
   const [selectedListName, setSelectedListName] = useState('clientes')
   const [customListName, setCustomListName] = useState('')
+  const [importResult, setImportResult] = useState<{ success: boolean; message: string } | null>(null)
 
-  // Bandwidth limit settings states
-  const [limitUp, setLimitUp] = useState<number | ''>('')
-  const [limitDown, setLimitDown] = useState<number | ''>('')
-  const [bandwidthModalOpen, setBandwidthModalOpen] = useState(false)
-  const [bandwidthSuccessMsg, setBandwidthSuccessMsg] = useState<string | null>(null)
-  const [bandwidthErrorMsg, setBandwidthErrorMsg] = useState<string | null>(null)
+  // Limpiar resultado de la importación cuando el modal se abre o se cierra
+  useEffect(() => {
+    if (!importingOpen) {
+      setImportResult(null)
+    }
+  }, [importingOpen])
+
+
+
+  // Estados de Monitoreo de Tráfico en Tiempo Real
+  const [liveTrafficMap, setLiveTrafficMap] = useState<Record<string, any[]>>({})
+  const [liveClients, setLiveClients] = useState<any[]>([])
+  const [availableInterfaces, setAvailableInterfaces] = useState<string[]>([])
+  const [selectedInterface, setSelectedInterface] = useState<string>('ether1')
+
+  useEffect(() => {
+    const wsUrl = (() => {
+      const token = localStorage.getItem('access_token') || ''
+      const apiHost = import.meta.env.VITE_API_URL
+      let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      let wsHost = window.location.host
+      if (apiHost) {
+        try {
+          const url = new URL(apiHost)
+          wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+          wsHost = url.host
+        } catch { }
+      }
+      return `${wsProtocol}//${wsHost}/api/traffic/ws/${id}?token=${token}`
+    })()
+
+    const ws = new WebSocket(wsUrl)
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        const timestamp = payload.timestamp
+
+        // 1. Interfaces
+        const ifaces = payload.interfaces || []
+        const ifaceNames = ifaces.map((i: any) => i.name)
+        setAvailableInterfaces((prev) => {
+          if (JSON.stringify(prev) !== JSON.stringify(ifaceNames)) {
+            return ifaceNames
+          }
+          return prev
+        })
+
+        setLiveTrafficMap((prev) => {
+          const updated = { ...prev }
+          for (const iface of ifaces) {
+            const points = updated[iface.name] || []
+            const newPoint = {
+              timestamp,
+              rx_rate: iface.rx_rate,
+              tx_rate: iface.tx_rate,
+            }
+            const nextPoints = [...points, newPoint]
+            updated[iface.name] = nextPoints.length > 30 ? nextPoints.slice(nextPoints.length - 30) : nextPoints
+          }
+          return updated
+        })
+
+        // 2. Clientes
+        const clients = payload.clients || []
+        const sortedClients = [...clients].sort((a: any, b: any) => (b.rx_rate + b.tx_rate) - (a.rx_rate + a.tx_rate))
+        setLiveClients(sortedClients)
+
+      } catch (err) {
+        console.error("Error al procesar mensaje de tráfico en vivo:", err)
+      }
+    }
+
+    return () => {
+      ws.close()
+    }
+  }, [id])
 
   // Consultar información del Router
   const { data: router, isLoading: isLoadingRouter, isError: isErrorRouter, refetch: refetchRouter } = useQuery({
@@ -257,46 +330,7 @@ export function RouterProfilePage() {
     }
   })
 
-  // Consultar el ancho de banda del router (Simple Queue Padre)
-  const { data: parentQueue, isLoading: isLoadingParentQueue, refetch: refetchParentQueue } = useQuery({
-    queryKey: ['router-parent-queue', id],
-    queryFn: async () => {
-      const { data } = await api.get(`/routers/${id}/parent-queue`)
-      return data
-    },
-    enabled: activeTab === 'settings'
-  })
 
-  // Sincronizar estados locales con los límites de la cola padre cuando se carguen
-  useEffect(() => {
-    if (parentQueue) {
-      setLimitUp(parentQueue.limit_up ?? '')
-      setLimitDown(parentQueue.limit_down ?? '')
-    }
-  }, [parentQueue])
-
-  // Mutación para actualizar los límites de la cola padre
-  const updateParentQueueMutation = useMutation({
-    mutationFn: async ({ limitUp, limitDown }: { limitUp: number; limitDown: number }) => {
-      const { data } = await api.post(`/routers/${id}/parent-queue`, null, {
-        params: {
-          limit_up_mbps: limitUp,
-          limit_down_mbps: limitDown
-        }
-      })
-      return data
-    },
-    onSuccess: () => {
-      refetchParentQueue()
-      setBandwidthSuccessMsg('Ancho de banda del router configurado con éxito.')
-      setBandwidthErrorMsg(null)
-    },
-    onError: (err: any) => {
-      const msg = err?.response?.data?.detail || 'Error al configurar el ancho de banda del router'
-      setBandwidthErrorMsg(msg)
-      setBandwidthSuccessMsg(null)
-    }
-  })
 
   // Consultar todos los clientes del router (para estadísticas y mapa de cobertura)
   const { data: allClients = [], isLoading: isLoadingAllClients } = useQuery<Client[]>({
@@ -416,15 +450,21 @@ export function RouterProfilePage() {
       return data
     },
     onSuccess: (data: any) => {
-      alert(`Importación exitosa. Se importaron ${data.imported_count} nuevos clientes.`)
-      setImportingOpen(false)
+      setImportResult({
+        success: true,
+        message: `Importación exitosa. Se importaron ${data.imported_count} nuevos clientes.`
+      })
       setSelectedListName('clientes')
       setCustomListName('')
-      queryClient.invalidateQueries({ queryKey: ['router-clients', id] })
+      queryClient.invalidateQueries({ queryKey: ['router-clients-paginated', id] })
+      queryClient.invalidateQueries({ queryKey: ['router-clients-all', id] })
     },
     onError: (err: any) => {
       const msg = err?.response?.data?.detail || 'Error al importar clientes desde el router.'
-      alert(msg)
+      setImportResult({
+        success: false,
+        message: msg
+      })
     }
   })
 
@@ -449,6 +489,14 @@ export function RouterProfilePage() {
       alert(msg)
     }
   })
+
+  // Función para sincronizar de manera completa todos los datos
+  const handleSyncAll = () => {
+    refetchRouter()
+    refetchQueues()
+    queryClient.invalidateQueries({ queryKey: ['router', id] })
+    queryClient.invalidateQueries({ queryKey: ['router-queues', id] })
+  }
 
   if (isLoadingRouter) {
     return (
@@ -484,7 +532,38 @@ export function RouterProfilePage() {
   const activePercentage = totalClients > 0 ? (activeClients / totalClients) * 100 : 0
 
   // Calcular ancho de banda dinámicamente desde las colas de MikroTik
-  const activeQueues = queues.filter((q: any) => !q.disabled && q.name !== 'PADRE' && q.name !== 'total')
+  const activeQueues = queues.filter((q: any) => {
+    if (q.disabled) return false
+    const name = q.name?.toLowerCase() || ''
+
+    // Filtrar dinámicamente la cola padre del router
+    const routerParent = router?.cola_padre?.toLowerCase() || ''
+    if (routerParent && name === routerParent) return false
+
+    // Filtros legados
+    if (name === 'isp_padre' || name === 'padre' || name === 'total') return false
+    if (name.startsWith('isp_padre_')) return false
+    return true
+  })
+
+  // Encontrar la cola padre del router en las colas traídas de MikroTik
+  const routerParentName = router?.cola_padre?.toLowerCase() || ''
+  const parentQueue = queues.find((q: any) => {
+    const qName = q.name?.toLowerCase() || ''
+    if (routerParentName && qName === routerParentName) return true
+    if (!routerParentName && (qName === 'isp_padre' || qName === 'padre' || qName === 'total')) return true
+    return false
+  })
+
+  // Extraer límites de velocidad del router (Prioridad: MikroTik parent queue max_limit > base de datos fallback)
+  let configuredDownMbps = router?.ancho_banda_down || 0
+  let configuredUpMbps = router?.ancho_banda_up || 0
+
+  if (parentQueue && parentQueue.max_limit) {
+    const [upMbps, downMbps] = parseMaxLimit(parentQueue.max_limit)
+    configuredUpMbps = upMbps
+    configuredDownMbps = downMbps
+  }
 
   const totalUpMbps = activeQueues.reduce((acc: number, q: any) => {
     const [up] = parseMaxLimit(q.max_limit)
@@ -527,7 +606,7 @@ export function RouterProfilePage() {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => refetchRouter()}
+            onClick={handleSyncAll}
             className="btn-secondary"
           >
             <RefreshCw className="w-4 h-4" />
@@ -697,14 +776,46 @@ export function RouterProfilePage() {
             )}
           </div>
 
-          {/* Tarjeta de Notas */}
-          <div className="glass-card p-5 space-y-2">
-            <div className="text-brand-400 font-semibold text-sm border-b border-border/40 pb-2">
-              Observaciones
+          {/* Monitoreo de Interfaces en Tiempo Real */}
+          <div className="glass-card p-5 border border-border/40 space-y-4 font-sans">
+            <div className="flex items-center justify-between border-b border-border/40 pb-2.5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Activity className="w-4 h-4 text-cyan-400" />
+                Monitoreo de Interfaces en Tiempo Real
+              </h3>
+
+              {availableInterfaces.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Interfaz:</span>
+                  <select
+                    value={selectedInterface}
+                    onChange={(e) => setSelectedInterface(e.target.value)}
+                    className="bg-secondary/60 text-foreground text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-border/40 outline-none focus:border-brand-500/50 transition-all cursor-pointer"
+                  >
+                    {availableInterfaces.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
-            <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">
-              {router.notas ? router.notas : 'Sin comentarios adicionales.'}
-            </p>
+
+            <div className="h-[250px] w-full relative">
+              {Object.keys(liveTrafficMap).length === 0 || !liveTrafficMap[selectedInterface] || liveTrafficMap[selectedInterface].length === 0 ? (
+                <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-brand-400" />
+                  Esperando datos en vivo del colector... (cada 5s)
+                </div>
+              ) : (
+                <TrafficChart
+                  data={liveTrafficMap[selectedInterface]}
+                  range="live"
+                  height={240}
+                />
+              )}
+            </div>
           </div>
         </div>
 
@@ -716,7 +827,7 @@ export function RouterProfilePage() {
               { id: 'stats', label: 'Estadísticas', icon: Network },
               { id: 'clients', label: 'Clientes Asociados', icon: Users },
               { id: 'queues', label: 'Colas de Tráfico', icon: Activity },
-              { id: 'settings', label: 'Configuración & Diagnóstico', icon: Sliders },
+              { id: 'settings', label: 'Diagnóstico', icon: Sliders },
             ].map((tab) => {
               const Icon = tab.icon
               const isActive = activeTab === tab.id
@@ -784,7 +895,16 @@ export function RouterProfilePage() {
                         <span className="text-xs text-muted-foreground">Calculando...</span>
                       </div>
                     ) : (
-                      <span className="text-lg font-bold text-blue-400 mt-1 block">{formatBandwidth(totalDownMbps)}</span>
+                      <span className="text-lg font-bold text-blue-400 mt-1 block">
+                        {formatBandwidth(totalDownMbps)}
+                        {configuredDownMbps ? (
+                          <span className="text-[10px] text-muted-foreground block font-normal mt-0.5">
+                            de {configuredDownMbps} Mbps totales ({((totalDownMbps / configuredDownMbps) * 100).toFixed(0)}%)
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground block font-normal mt-0.5">Límite router: Ilimitado</span>
+                        )}
+                      </span>
                     )}
                   </div>
                   <div className="bg-secondary/20 p-4 rounded-lg border border-border/20">
@@ -795,26 +915,100 @@ export function RouterProfilePage() {
                         <span className="text-xs text-muted-foreground">Calculando...</span>
                       </div>
                     ) : (
-                      <span className="text-lg font-bold text-purple-400 mt-1 block">{formatBandwidth(totalUpMbps)}</span>
+                      <span className="text-lg font-bold text-purple-400 mt-1 block">
+                        {formatBandwidth(totalUpMbps)}
+                        {configuredUpMbps ? (
+                          <span className="text-[10px] text-muted-foreground block font-normal mt-0.5">
+                            de {configuredUpMbps} Mbps totales ({((totalUpMbps / configuredUpMbps) * 100).toFixed(0)}%)
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground block font-normal mt-0.5">Límite router: Ilimitado</span>
+                        )}
+                      </span>
                     )}
                   </div>
                   <div className="bg-secondary/20 p-4 rounded-lg border border-border/20">
-                    <span className="block text-xs text-muted-foreground">Ancho de Banda Total</span>
-                    {isLoadingQueues ? (
+                    <span className="block text-xs text-muted-foreground">Capacidad Límite del Router</span>
+                    {isLoadingRouter || isLoadingQueues ? (
                       <div className="flex items-center gap-1.5 mt-2">
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-400" />
-                        <span className="text-xs text-muted-foreground">Calculando...</span>
+                        <span className="text-xs text-muted-foreground">Cargando...</span>
                       </div>
                     ) : (
-                      <span className="text-lg font-bold text-brand-400 mt-1 block">{formatBandwidth(totalDownMbps + totalUpMbps)}</span>
+                      <span className="text-lg font-bold text-brand-400 mt-1 block">
+                        {configuredDownMbps || configuredUpMbps ? (
+                          <>
+                            ↓ {configuredDownMbps} / ↑ {configuredUpMbps} <span className="text-xs font-semibold text-muted-foreground">Mbps</span>
+                          </>
+                        ) : (
+                          'Ilimitado (0/0)'
+                        )}
+                        <span className="text-[10px] text-muted-foreground block font-normal mt-0.5">
+                          Cola: <strong>{parentQueue?.name || router?.cola_padre || 'sin cola'}</strong>
+                        </span>
+                      </span>
                     )}
                   </div>
                 </div>
 
                 <div className="text-xs text-muted-foreground leading-relaxed pt-2 border-t border-border/20 flex flex-wrap justify-between gap-2">
                   <span>Ancho de banda promedio por cliente activo: <strong>{activeClients > 0 ? formatBandwidth((totalDownMbps + totalUpMbps) / activeClients) : '0 MB'}</strong></span>
-                  <span>Capacidad de carga calculada sobre las colas de tráfico activas en MikroTik.</span>
+                  <span>
+                    {configuredDownMbps && configuredUpMbps
+                      ? `Asignación de capacidad: ↓ ${((totalDownMbps / configuredDownMbps) * 100).toFixed(0)}% / ↑ ${((totalUpMbps / configuredUpMbps) * 100).toFixed(0)}% respecto al límite del Router.`
+                      : 'Capacidad de carga calculada sobre las colas de tráfico activas en MikroTik.'}
+                  </span>
                 </div>
+              </div>
+
+              {/* Top 10 Clientes Activos por Consumo */}
+              <div className="glass-card p-5 border border-border/40 space-y-4 font-sans">
+                <h3 className="text-sm font-semibold text-foreground border-b border-border/40 pb-2.5 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-brand-400" />
+                  Top 10 Clientes Activos
+                </h3>
+
+                {liveClients.length === 0 ? (
+                  <p className="text-center py-6 text-xs text-muted-foreground flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-brand-400" />
+                    Cargando ranking de consumo en vivo...
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Cliente</th>
+                          <th>Tasa Descarga (RX)</th>
+                          <th>Tasa Subida (TX)</th>
+                          <th>Consumo Total (Acumulado)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {liveClients.slice(0, 10).map((lc: any) => (
+                          <tr
+                            key={lc.cliente_id}
+                            onClick={() => navigate(`/clients/${lc.cliente_id}`)}
+                            className="hover:bg-secondary/40 cursor-pointer transition-colors"
+                          >
+                            <td className="font-semibold text-sm text-foreground">
+                              {lc.nombre}
+                            </td>
+                            <td className="font-mono text-xs text-cyan-400 font-bold">
+                              {formatSpeed(lc.rx_rate)}
+                            </td>
+                            <td className="font-mono text-xs text-violet-400 font-bold">
+                              {formatSpeed(lc.tx_rate)}
+                            </td>
+                            <td className="font-mono text-xs text-muted-foreground">
+                              {((lc.rx_bytes + lc.tx_bytes) / (1024 * 1024)).toFixed(1)} MB
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1044,63 +1238,9 @@ export function RouterProfilePage() {
             </div>
           )}
 
-
-
           {/* Pestaña: Configuración y Diagnóstico */}
           {activeTab === 'settings' && (
             <div className="space-y-6">
-              {/* Configuración de Ancho de Banda del Router */}
-              {isAdmin && (
-                <div className="glass-card p-5 space-y-4 border border-border/40 animate-fade-in">
-                  <div className="flex items-center justify-between border-b border-border/40 pb-2.5">
-                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                      <Sliders className="w-4 h-4 text-brand-400" />
-                      Ancho de Banda del Router
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (parentQueue) {
-                          setLimitUp(parentQueue.limit_up ?? '')
-                          setLimitDown(parentQueue.limit_down ?? '')
-                        }
-                        setBandwidthSuccessMsg(null)
-                        setBandwidthErrorMsg(null)
-                        setBandwidthModalOpen(true)
-                      }}
-                      className="btn-secondary text-xs flex items-center gap-1.5 hover:text-brand-400"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      Configurar
-                    </button>
-                  </div>
-
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Velocidad máxima general configurada en MikroTik para la cola simple principal (<strong>PADRE</strong> o <strong>TOTAL</strong>).
-                  </p>
-
-                  {isLoadingParentQueue ? (
-                    <div className="text-xs text-muted-foreground py-2 flex items-center gap-2">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando límites actuales...
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                      <div className="bg-secondary/10 p-3 rounded-lg border border-border/20">
-                        <span className="block text-[10px] uppercase font-bold text-muted-foreground">Límite Subida (Upload)</span>
-                        <span className="text-base font-extrabold text-purple-400 mt-1 block">
-                          {parentQueue?.limit_up ? `${parentQueue.limit_up} MB` : '0 MB (Ilimitado)'}
-                        </span>
-                      </div>
-                      <div className="bg-secondary/10 p-3 rounded-lg border border-border/20">
-                        <span className="block text-[10px] uppercase font-bold text-muted-foreground">Límite Descarga (Download)</span>
-                        <span className="text-base font-extrabold text-blue-400 mt-1 block">
-                          {parentQueue?.limit_down ? `${parentQueue.limit_down} MB` : '0 MB (Ilimitado)'}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
               {/* Sección Diagnóstico de MikroTik */}
               <div className="glass-card p-5 space-y-4 border border-border/40">
                 <div className="flex items-center justify-between border-b border-border/40 pb-2.5">
@@ -1213,6 +1353,7 @@ export function RouterProfilePage() {
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['router', id] })
             queryClient.invalidateQueries({ queryKey: ['routers'] })
+            queryClient.invalidateQueries({ queryKey: ['router-queues', id] })
             setEditOpen(false)
           }}
           onDelete={() => {
@@ -1267,77 +1408,115 @@ export function RouterProfilePage() {
               </button>
             </div>
 
-            <form onSubmit={handleImportSubmit} className="p-5 space-y-4">
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Selecciona una lista de direcciones del router <strong>{router.nombre}</strong>. Se importarán todas sus IPs y se registrarán como nuevos clientes en el sistema y en la lista <strong>clientes</strong> de MikroTik.
-              </p>
-
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1.5">
-                  Seleccionar Address-list *
-                </label>
-                {isLoadingLists ? (
-                  <div className="text-xs text-muted-foreground py-2 flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando listas del router...
-                  </div>
-                ) : (
-                  <select
-                    value={selectedListName}
-                    onChange={(e) => {
-                      setSelectedListName(e.target.value)
-                      if (e.target.value !== 'custom') {
-                        setCustomListName('')
-                      }
-                    }}
-                    className="input-field cursor-pointer"
-                  >
-                    <option value="clientes">clientes (Por defecto)</option>
-                    {addressLists
-                      .filter((l: string) => l !== 'clientes')
-                      .map((listName: string) => (
-                        <option key={listName} value={listName}>
-                          {listName}
-                        </option>
-                      ))}
-                    <option value="custom">-- Escribir nombre personalizado --</option>
-                  </select>
-                )}
-              </div>
-
-              {selectedListName === 'custom' && (
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-1.5">
-                    Nombre de la lista personalizado *
-                  </label>
-                  <input
-                    type="text"
-                    value={customListName}
-                    onChange={(e) => setCustomListName(e.target.value)}
-                    placeholder="Ej: IPs_Nuevas, WAN_List, etc."
-                    required
-                    className="input-field font-sans"
-                  />
+            {importResult?.success ? (
+              <div className="p-6 text-center space-y-4 font-sans">
+                <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center mx-auto text-emerald-400 animate-fade-in">
+                  <CheckCircle2 className="w-6 h-6" />
                 </div>
-              )}
-
-              <div className="flex gap-3 pt-2">
+                <div className="space-y-1.5">
+                  <h3 className="text-base font-semibold text-foreground">¡Importación Exitosa!</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed font-sans">
+                    {importResult.message}
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => setImportingOpen(false)}
-                  className="btn-secondary flex-1 justify-center"
+                  className="btn-primary w-full justify-center mt-2"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={importMutation.isPending || (selectedListName === 'custom' && !customListName.trim())}
-                  className="btn-primary flex-1 justify-center"
-                >
-                  {importMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {importMutation.isPending ? 'Importando...' : 'Importar'}
+                  Entendido
                 </button>
               </div>
-            </form>
+            ) : (
+              <form onSubmit={handleImportSubmit} className="p-5 space-y-4">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Selecciona una lista de direcciones del router <strong>{router.nombre}</strong>. Se importarán todas sus IPs y se registrarán como nuevos clientes en el sistema y en la lista <strong>clientes</strong> de MikroTik.
+                </p>
+
+                {importResult && !importResult.success && (
+                  <div className="rounded-lg p-3.5 flex items-start gap-3 text-xs leading-relaxed bg-destructive/10 border border-destructive/30 text-destructive font-sans">
+                    <XCircle className="w-4.5 h-4.5 text-destructive flex-shrink-0 mt-0.5" />
+                    <div className="flex-grow">
+                      <p className="font-semibold text-foreground">Fallo en la importación</p>
+                      <p className="mt-0.5 text-muted-foreground">{importResult.message}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setImportResult(null)}
+                      className="text-muted-foreground hover:text-foreground transition-colors ml-1"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1.5">
+                    Seleccionar Address-list *
+                  </label>
+                  {isLoadingLists ? (
+                    <div className="text-xs text-muted-foreground py-2 flex items-center gap-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando listas del router...
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedListName}
+                      onChange={(e) => {
+                        setSelectedListName(e.target.value)
+                        if (e.target.value !== 'custom') {
+                          setCustomListName('')
+                        }
+                      }}
+                      className="input-field cursor-pointer"
+                    >
+                      <option value="clientes">clientes</option>
+                      {addressLists
+                        .filter((l: string) => l !== 'clientes')
+                        .map((listName: string) => (
+                          <option key={listName} value={listName}>
+                            {listName}
+                          </option>
+                        ))}
+                      <option value="custom">-- Escribir nombre personalizado --</option>
+                    </select>
+                  )}
+                </div>
+
+                {selectedListName === 'custom' && (
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">
+                      Nombre de la lista personalizado *
+                    </label>
+                    <input
+                      type="text"
+                      value={customListName}
+                      onChange={(e) => setCustomListName(e.target.value)}
+                      placeholder="Ej: IPs_Nuevas, WAN_List, etc."
+                      required
+                      className="input-field font-sans"
+                    />
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setImportingOpen(false)}
+                    className="btn-secondary flex-1 justify-center"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={importMutation.isPending || (selectedListName === 'custom' && !customListName.trim())}
+                    className="btn-primary flex-1 justify-center"
+                  >
+                    {importMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {importMutation.isPending ? 'Importando...' : 'Importar'}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
@@ -1412,127 +1591,6 @@ export function RouterProfilePage() {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Modal Configurar Ancho de Banda (Cola Padre) ── */}
-      {bandwidthModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="glass-card w-full max-w-md mx-8 border border-border/50 animate-fade-in">
-            <div className="flex items-center justify-between p-5 border-b border-border">
-              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-brand-400" />
-                Configurar Ancho de Banda Router
-              </h2>
-              <button
-                type="button"
-                onClick={() => setBandwidthModalOpen(false)}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (limitUp === '' || limitDown === '') return
-                updateParentQueueMutation.mutate({ limitUp: Number(limitUp), limitDown: Number(limitDown) })
-              }}
-              className="p-5 space-y-4 font-sans"
-            >
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Modifica los límites máximos de velocidad asignados a la cola simple padre en MikroTik (<strong>PADRE</strong> o <strong>TOTAL</strong>).
-              </p>
-
-              {bandwidthSuccessMsg && (
-                <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-3 rounded-lg text-xs font-semibold flex items-center gap-2 animate-fade-in">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 animate-pulse" />
-                  <span>{bandwidthSuccessMsg}</span>
-                </div>
-              )}
-
-              {bandwidthErrorMsg && (
-                <div className="bg-destructive/10 border border-destructive/30 text-destructive p-3 rounded-lg text-xs font-semibold flex items-center gap-2 animate-fade-in">
-                  <XCircle className="w-4 h-4 text-destructive flex-shrink-0" />
-                  <span>{bandwidthErrorMsg}</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-muted-foreground mb-1.5 font-medium">
-                    Download (Mbps)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      min="0"
-                      value={limitDown}
-                      disabled={!!bandwidthSuccessMsg}
-                      onChange={(e) => setLimitDown(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="Ej: 300"
-                      required
-                      className="input-field pr-12 font-sans font-medium"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground uppercase">
-                      Mbps
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-muted-foreground mb-1.5 font-medium">
-                    Upload (Mbps)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      min="0"
-                      value={limitUp}
-                      disabled={!!bandwidthSuccessMsg}
-                      onChange={(e) => setLimitUp(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="Ej: 100"
-                      required
-                      className="input-field pr-12 font-sans font-medium"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground uppercase">
-                      Mbps
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {bandwidthSuccessMsg ? (
-                <div className="flex pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setBandwidthModalOpen(false)}
-                    className="btn-primary flex-1 justify-center font-semibold"
-                  >
-                    Cerrar
-                  </button>
-                </div>
-              ) : (
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setBandwidthModalOpen(false)}
-                    className="btn-secondary flex-1 justify-center"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={updateParentQueueMutation.isPending || limitUp === '' || limitDown === ''}
-                    className="btn-primary flex-1 justify-center flex items-center gap-1.5 font-semibold"
-                  >
-                    {updateParentQueueMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-                    {updateParentQueueMutation.isPending ? 'Guardando...' : 'Confirmar'}
-                  </button>
-                </div>
-              )}
-            </form>
           </div>
         </div>
       )}
