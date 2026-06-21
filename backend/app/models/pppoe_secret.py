@@ -1,0 +1,51 @@
+"""
+Modelo SQLAlchemy: PPPoESecret
+"""
+import uuid
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, Uuid, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.database import Base
+
+
+class PPPoESecret(Base):
+    __tablename__ = "pppoe_secrets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(native_uuid=False), primary_key=True, default=uuid.uuid4
+    )
+    cliente_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(native_uuid=False), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    usuario_ppp: Mapped[str] = mapped_column(String(100), nullable=False)
+    contraseña_ppp: Mapped[str] = mapped_column(String(255), nullable=False)  # Fernet cifrado
+    perfil_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(native_uuid=False), ForeignKey("pppoe_profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    router_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(native_uuid=False), ForeignKey("routers.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    # Restricción única: router + usuario_ppp (no puede haber dos usuarios ppp iguales en el mismo router)
+    __table_args__ = (
+        UniqueConstraint("router_id", "usuario_ppp", name="uq_router_usuario_ppp"),
+    )
+
+    # Relaciones
+    client = relationship("Client", back_populates="pppoe_secret")
+    router = relationship("Router", back_populates="pppoe_secrets")
+    perfil = relationship("PPPoEProfile", back_populates="pppoe_secrets")
+
+    def __repr__(self) -> str:
+        return f"<PPPoESecret id={self.id} usuario={self.usuario_ppp} router_id={self.router_id}>"

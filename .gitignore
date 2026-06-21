@@ -10,6 +10,10 @@ build/
 .eggs/
 .ruff_cache/
 .mypy_cache/
+.nox/
+.hypothesis/
+.ipynb_checkpoints/
+.python-version
 
 # Virtual environments
 .venv/
@@ -40,6 +44,8 @@ ENV/
 .LSOverride
 Icon\r
 ._*
+.Spotlight-V100/
+.Trashes/
 
 # Database & Cache (local storage)
 postgres_data/
@@ -56,6 +62,10 @@ dist/
 **/dist/
 frontend/.vite/
 frontend/.next/
+coverage/
+coverage.xml
+.nyc_output/
+*.eslintcache
 *.tsbuildinfo
 
 # Celery & Background Jobs

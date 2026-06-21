@@ -42,6 +42,7 @@ class Client(Base):
     router = relationship("Router")
     client_plans = relationship("ClientPlan", back_populates="client", cascade="all, delete-orphan")
     static_ip = relationship("StaticIP", back_populates="client", uselist=False, cascade="all, delete-orphan")
+    pppoe_secret = relationship("PPPoESecret", back_populates="client", uselist=False, cascade="all, delete-orphan")
     payments = relationship("ClientPayment", back_populates="client", cascade="all, delete-orphan")
     tickets = relationship("ClientTicket", back_populates="client", cascade="all, delete-orphan")
 

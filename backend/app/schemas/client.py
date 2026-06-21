@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.core.validators import validate_ecuadorian_cedula
 from app.schemas.plan import PlanResponse
 from app.schemas.static_ip import StaticIPResponse
+from app.schemas.pppoe import PPPoESecretRead
 
 
 class ClientBase(BaseModel):
@@ -35,6 +36,9 @@ class ClientCreate(ClientBase):
     ip: str | None = Field(default=None, min_length=7, max_length=45)
     mac: str | None = Field(default=None, min_length=17, max_length=17)
     notas_ip: str | None = None
+    usuario_ppp: str | None = Field(default=None, min_length=1, max_length=100)
+    contraseña_ppp: str | None = Field(default=None, min_length=1, max_length=255)
+    perfil_id: uuid.UUID | None = None
 
     @field_validator("cedula")
     @classmethod
@@ -58,6 +62,9 @@ class ClientUpdate(BaseModel):
     ip: str | None = Field(default=None, min_length=7, max_length=45)
     mac: str | None = Field(default=None, min_length=17, max_length=17)
     notas_ip: str | None = None
+    usuario_ppp: str | None = Field(default=None, min_length=1, max_length=100)
+    contraseña_ppp: str | None = Field(default=None, min_length=1, max_length=255)
+    perfil_id: uuid.UUID | None = None
     created_at: datetime | None = None
 
     @field_validator("tipo")
@@ -115,6 +122,7 @@ class ClientResponse(ClientBase):
     plan_activo: PlanResponse | None = None
     router_nombre: str | None = None
     static_ip: StaticIPResponse | None = None
+    pppoe_secret: PPPoESecretRead | None = None
 
 
 # Schema de respuesta de listado de clientes con paginación

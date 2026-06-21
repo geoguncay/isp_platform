@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from app.core import database as db_module
 from app.core.database import Base
@@ -99,6 +99,16 @@ def client():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def mock_router_services():
+    with patch("app.api.clients.sync_ip_in_address_list"), \
+         patch("app.api.clients.remove_ip_from_address_list"), \
+         patch("app.api.clients.sync_client_queue"), \
+         patch("app.api.clients.remove_client_queue"), \
+         patch("app.api.clients.toggle_client_queue"):
+        yield
+
+
 def test_create_client_invalid_cedula(client: TestClient):
     login = client.post(
         "/api/auth/login",
@@ -121,7 +131,8 @@ def test_create_client_invalid_cedula(client: TestClient):
             "telefono": "0999999999",
             "direccion": "Sector La Mariscal, Quito",
             "router_id": str(router.id),
-            "tipo": "pppoe",
+            "tipo": "static",
+            "ip": "192.168.10.10",
         },
     )
     assert response.status_code == 422
@@ -149,7 +160,8 @@ def test_create_client_valid_cedula_no_plan(client: TestClient):
             "telefono": "0999999999",
             "direccion": "Sector La Mariscal, Quito",
             "router_id": str(router.id),
-            "tipo": "pppoe",
+            "tipo": "static",
+            "ip": "192.168.10.10",
             "latitud": -0.180653,
             "longitud": -78.467834,
         },
@@ -183,7 +195,8 @@ def test_create_client_with_initial_plan(client: TestClient):
             "direccion": "Av. Carlos Julio Arosemena, Guayaquil",
             "router_id": str(router.id),
             "plan_id": str(plan.id),
-            "tipo": "pppoe",
+            "tipo": "static",
+            "ip": "192.168.10.10",
         },
     )
     assert response.status_code == 201
@@ -481,7 +494,8 @@ def test_update_client_cedula_and_email(client: TestClient):
             "telefono": "0999999999",
             "direccion": "Quito",
             "router_id": str(router.id),
-            "tipo": "pppoe",
+            "tipo": "static",
+            "ip": "192.168.10.10",
             "email": "test@client.com"
         },
     )
@@ -525,7 +539,8 @@ def test_create_client_valid_ruc(client: TestClient):
             "telefono": "0999999999",
             "direccion": "Quito",
             "router_id": str(router.id),
-            "tipo": "pppoe",
+            "tipo": "static",
+            "ip": "192.168.10.10",
         },
     )
     assert resp1.status_code == 201
@@ -541,7 +556,8 @@ def test_create_client_valid_ruc(client: TestClient):
             "telefono": "0999999999",
             "direccion": "Quito",
             "router_id": str(router.id),
-            "tipo": "pppoe",
+            "tipo": "static",
+            "ip": "192.168.10.11",
         },
     )
     assert resp2.status_code == 201
@@ -557,7 +573,8 @@ def test_create_client_valid_ruc(client: TestClient):
             "telefono": "0999999999",
             "direccion": "Quito",
             "router_id": str(router.id),
-            "tipo": "pppoe",
+            "tipo": "static",
+            "ip": "192.168.10.12",
         },
     )
     assert resp3.status_code == 201
@@ -585,7 +602,8 @@ def test_create_client_invalid_ruc(client: TestClient):
             "telefono": "0999999999",
             "direccion": "Quito",
             "router_id": str(router.id),
-            "tipo": "pppoe",
+            "tipo": "static",
+            "ip": "192.168.10.10",
         },
     )
     assert response.status_code == 422
@@ -614,7 +632,8 @@ def test_create_and_update_client_custom_created_at(client: TestClient):
             "telefono": "0999999999",
             "direccion": "Quito",
             "router_id": str(router.id),
-            "tipo": "pppoe",
+            "tipo": "static",
+            "ip": "192.168.10.10",
             "created_at": custom_date,
         },
     )

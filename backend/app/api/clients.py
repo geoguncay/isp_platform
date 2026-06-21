@@ -17,6 +17,14 @@ from app.models.static_ip import StaticIP
 from app.models.payment import ClientPayment
 from app.models.ticket import ClientTicket
 from app.models.suspension_log import SuspensionLog
+from app.models.pppoe_secret import PPPoESecret
+from app.models.pppoe_profile import PPPoEProfile
+from app.services.mikrotik.pppoe import (
+    sync_pppoe_secret_in_router,
+    remove_pppoe_secret_from_router,
+    disconnect_pppoe_session,
+)
+from app.core.security import encrypt_secret, decrypt_secret
 from app.services.mikrotik.address_list import (
     sync_ip_in_address_list,
     remove_ip_from_address_list,
@@ -74,6 +82,26 @@ def _enrich_client(client: Client, db: Session) -> dict:
         data["static_ip"] = client.static_ip
     else:
         data["static_ip"] = None
+
+    # PPPoE Secret
+    if client.pppoe_secret:
+        try:
+            decrypted_password = decrypt_secret(client.pppoe_secret.contraseña_ppp)
+        except Exception:
+            decrypted_password = "[Error al descifrar]"
+            
+        data["pppoe_secret"] = {
+            "id": client.pppoe_secret.id,
+            "cliente_id": client.pppoe_secret.cliente_id,
+            "router_id": client.pppoe_secret.router_id,
+            "usuario_ppp": client.pppoe_secret.usuario_ppp,
+            "perfil_id": client.pppoe_secret.perfil_id,
+            "contraseña_ppp": decrypted_password,
+            "created_at": client.pppoe_secret.created_at,
+            "updated_at": client.pppoe_secret.updated_at,
+        }
+    else:
+        data["pppoe_secret"] = None
 
     return data
 
@@ -219,6 +247,61 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"La dirección IP {payload.ip} ya está asignada a otro cliente en este router.",
             )
+    elif payload.tipo == "pppoe":
+        if not payload.usuario_ppp:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El usuario PPPoE es obligatorio para conexiones PPPoE.",
+            )
+        if not payload.contraseña_ppp:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La contraseña PPPoE es obligatoria para conexiones PPPoE.",
+            )
+        if not payload.plan_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El plan es obligatorio para conexiones PPPoE.",
+            )
+        # Validar usuario único
+        exists_user = db.query(PPPoESecret).filter(
+            PPPoESecret.router_id == payload.router_id,
+            PPPoESecret.usuario_ppp == payload.usuario_ppp
+        ).first()
+        if exists_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"El usuario PPPoE '{payload.usuario_ppp}' ya está asignado a otro cliente en este router.",
+            )
+        
+        # Obtener el plan seleccionado
+        plan = db.get(Plan, payload.plan_id)
+        
+        # Buscar o crear el PPPoEProfile local para este router y plan
+        profile = db.query(PPPoEProfile).filter(
+            PPPoEProfile.router_id == payload.router_id,
+            PPPoEProfile.nombre == plan.nombre
+        ).first()
+        if not profile:
+            profile = PPPoEProfile(
+                nombre=plan.nombre,
+                velocidad_down_mbps=plan.velocidad_down_mbps,
+                velocidad_up_mbps=plan.velocidad_up_mbps,
+                router_id=payload.router_id
+            )
+            db.add(profile)
+            db.flush()
+
+        # Asegurar perfil en MikroTik
+        try:
+            from app.services.mikrotik.pppoe import sync_pppoe_profile_in_router
+            sync_pppoe_profile_in_router(r, plan)
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"No se pudo configurar el perfil PPPoE en el router MikroTik. Error: {str(e)}"
+            )
 
     client = Client(
         nombre=payload.nombre,
@@ -235,7 +318,7 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
     if payload.created_at:
         client.created_at = payload.created_at
     db.add(client)
-    db.flush()  # Generar ID del cliente antes de asociar el plan e IP
+    db.flush()  # Generar ID del cliente antes de asociar el plan e IP / secreto
 
     # Crear el registro del plan inicial si se especificó
     if payload.plan_id:
@@ -283,6 +366,34 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"No se pudo registrar la IP o la cola en el router MikroTik. Verifique conectividad. Error: {str(e)}"
+            )
+
+    # Crear el registro PPPoE si se especificó
+    elif payload.tipo == "pppoe" and payload.usuario_ppp and payload.contraseña_ppp:
+        pppoe_sec = PPPoESecret(
+            cliente_id=client.id,
+            usuario_ppp=payload.usuario_ppp,
+            contraseña_ppp=encrypt_secret(payload.contraseña_ppp),
+            perfil_id=profile.id,
+            router_id=payload.router_id,
+        )
+        db.add(pppoe_sec)
+        
+        # Sincronizar con MikroTik
+        try:
+            sync_pppoe_secret_in_router(
+                router=r,
+                username=payload.usuario_ppp,
+                password=payload.contraseña_ppp,
+                profile_name=profile.nombre,
+                client_name=client.nombre,
+                disabled=False
+            )
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"No se pudo registrar el secreto PPPoE en el router MikroTik. Verifique conectividad. Error: {str(e)}"
             )
 
     db.commit()
@@ -347,8 +458,16 @@ def update_client(
             logger.warning(f"No se pudo remover la cola en MikroTik al cambiar a PPPoE: {e}")
         db.delete(client.static_ip)
 
+    # Si el tipo cambia a static y tenía un secreto PPPoE, removerlo de MikroTik y BD
+    if new_tipo == "static" and client.pppoe_secret:
+        try:
+            remove_pppoe_secret_from_router(client.router, client.pppoe_secret.usuario_ppp)
+        except Exception as e:
+            logger.warning(f"No se pudo remover el secreto PPPoE en MikroTik al cambiar a Estática: {e}")
+        db.delete(client.pppoe_secret)
+
     # Si es static o cambia a static, validar y sincronizar IP
-    elif new_tipo == "static":
+    if new_tipo == "static":
         ip_val = update_data.get("ip") if "ip" in update_data else old_ip
         if not ip_val:
              raise HTTPException(
@@ -441,9 +560,138 @@ def update_client(
             except Exception as e:
                 logger.warning(f"No se pudo remover la IP o cola en MikroTik al desactivar cliente: {e}")
 
+    # Si es pppoe o cambia a pppoe, validar y sincronizar secreto
+    elif new_tipo == "pppoe":
+        user_val = update_data.get("usuario_ppp") or (client.pppoe_secret.usuario_ppp if client.pppoe_secret else None)
+        pass_val = update_data.get("contraseña_ppp") or (decrypt_secret(client.pppoe_secret.contraseña_ppp) if client.pppoe_secret else None)
+
+        if not user_val:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El usuario PPPoE es obligatorio para conexiones PPPoE.",
+            )
+        if not pass_val:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La contraseña PPPoE es obligatoria para conexiones PPPoE.",
+            )
+
+        # Validar usuario único en el router de destino
+        if "usuario_ppp" in update_data or "router_id" in update_data:
+            exists_user = db.query(PPPoESecret).filter(
+                PPPoESecret.router_id == new_router_id,
+                PPPoESecret.usuario_ppp == user_val,
+                PPPoESecret.cliente_id != client.id
+            ).first()
+            if exists_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"El usuario PPPoE '{user_val}' ya está asignado a otro cliente en este router.",
+                )
+
+        # Obtener el plan activo del cliente para configurar el perfil PPPoE
+        active_client_plan = (
+            db.query(ClientPlan)
+            .filter(ClientPlan.cliente_id == client.id, ClientPlan.estado == "activo")
+            .first()
+        )
+        if not active_client_plan:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El cliente debe tener un plan activo para configurar una conexión PPPoE.",
+            )
+        plan = active_client_plan.plan
+
+        # Buscar o crear el PPPoEProfile local para este router y plan
+        profile = db.query(PPPoEProfile).filter(
+            PPPoEProfile.router_id == new_router_id,
+            PPPoEProfile.nombre == plan.nombre
+        ).first()
+        if not profile:
+            profile = PPPoEProfile(
+                nombre=plan.nombre,
+                velocidad_down_mbps=plan.velocidad_down_mbps,
+                velocidad_up_mbps=plan.velocidad_up_mbps,
+                router_id=new_router_id
+            )
+            db.add(profile)
+            db.flush()
+
+        perf_id = profile.id
+        new_router = db.get(Router, new_router_id)
+
+        # Asegurar perfil en MikroTik
+        try:
+            from app.services.mikrotik.pppoe import sync_pppoe_profile_in_router
+            sync_pppoe_profile_in_router(new_router, plan)
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"No se pudo configurar el perfil PPPoE en el router MikroTik. Error: {str(e)}"
+            )
+
+        new_router = db.get(Router, new_router_id)
+
+        # Remover secreto anterior si cambió de usuario o de router
+        old_user = client.pppoe_secret.usuario_ppp if client.pppoe_secret else None
+        if old_user and (old_user != user_val or old_router_id != new_router_id):
+            try:
+                remove_pppoe_secret_from_router(old_router, old_user)
+            except Exception as e:
+                logger.warning(f"No se pudo remover el secreto PPPoE anterior en MikroTik: {e}")
+
+        # Guardar en base de datos
+        if client.pppoe_secret:
+            client.pppoe_secret.usuario_ppp = user_val
+            if "contraseña_ppp" in update_data:
+                client.pppoe_secret.contraseña_ppp = encrypt_secret(update_data["contraseña_ppp"])
+            client.pppoe_secret.perfil_id = perf_id
+            client.pppoe_secret.router_id = new_router_id
+        else:
+            client.pppoe_secret = PPPoESecret(
+                cliente_id=client.id,
+                usuario_ppp=user_val,
+                contraseña_ppp=encrypt_secret(pass_val),
+                perfil_id=perf_id,
+                router_id=new_router_id,
+            )
+
+        # Sincronizar secreto PPPoE en el router MikroTik según estado activo
+        new_activo = update_data.get("activo", client.activo)
+        if new_activo:
+            try:
+                sync_pppoe_secret_in_router(
+                    router=new_router,
+                    username=user_val,
+                    password=pass_val,
+                    profile_name=profile.nombre,
+                    client_name=update_data.get("nombre", client.nombre),
+                    disabled=False
+                )
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Error al sincronizar con el router MikroTik: {str(e)}"
+                )
+        else:
+            try:
+                sync_pppoe_secret_in_router(
+                    router=new_router,
+                    username=user_val,
+                    password=pass_val,
+                    profile_name=profile.nombre,
+                    client_name=update_data.get("nombre", client.nombre),
+                    disabled=True
+                )
+                disconnect_pppoe_session(new_router, user_val)
+            except Exception as e:
+                logger.warning(f"No se pudo deshabilitar/desconectar la sesión PPPoE en MikroTik: {e}")
+
     # Actualizar campos básicos
     for field, value in update_data.items():
-        if field not in ("ip", "mac", "notas_ip"):
+        if field not in ("ip", "mac", "notas_ip", "usuario_ppp", "contraseña_ppp", "perfil_id"):
             setattr(client, field, value)
 
     db.commit()
@@ -471,6 +719,12 @@ def delete_client(client_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -> Non
             remove_client_queue(client.router, client.static_ip.ip)
         except Exception as e:
             logger.warning(f"No se pudo remover la cola en MikroTik al borrar cliente: {e}")
+
+    if client.tipo == "pppoe" and client.pppoe_secret:
+        try:
+            remove_pppoe_secret_from_router(client.router, client.pppoe_secret.usuario_ppp)
+        except Exception as e:
+            logger.warning(f"No se pudo remover el secreto PPPoE en MikroTik al borrar cliente: {e}")
 
     db.delete(client)
     db.commit()
@@ -546,6 +800,47 @@ def assign_client_plan(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Fallo al actualizar la cola en MikroTik: {str(e)}"
+            )
+    
+    # Sincronizar secreto PPPoE si el cliente es PPPoE y tiene secreto
+    elif client.tipo == "pppoe" and client.pppoe_secret:
+        try:
+            # 1. Buscar o crear el PPPoEProfile local para este router y plan
+            profile = db.query(PPPoEProfile).filter(
+                PPPoEProfile.router_id == client.router_id,
+                PPPoEProfile.nombre == plan.nombre
+            ).first()
+            if not profile:
+                profile = PPPoEProfile(
+                    nombre=plan.nombre,
+                    velocidad_down_mbps=plan.velocidad_down_mbps,
+                    velocidad_up_mbps=plan.velocidad_up_mbps,
+                    router_id=client.router_id
+                )
+                db.add(profile)
+                db.flush()
+            
+            # 2. Asegurar perfil en MikroTik
+            from app.services.mikrotik.pppoe import sync_pppoe_profile_in_router, sync_pppoe_secret_in_router
+            sync_pppoe_profile_in_router(client.router, plan)
+            
+            # 3. Actualizar la relación del secreto
+            client.pppoe_secret.perfil_id = profile.id
+            
+            # 4. Sincronizar secreto en MikroTik con el nuevo perfil
+            password_dec = decrypt_secret(client.pppoe_secret.contraseña_ppp)
+            sync_pppoe_secret_in_router(
+                router=client.router,
+                username=client.pppoe_secret.usuario_ppp,
+                password=password_dec,
+                profile_name=profile.nombre,
+                client_name=client.nombre,
+                disabled=not client.activo
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Fallo al actualizar el perfil/secreto PPPoE en MikroTik: {str(e)}"
             )
 
     # Crear el nuevo registro del plan
@@ -669,7 +964,7 @@ def suspend_client(
     if active_plan:
         active_plan.estado = "suspendido"
 
-    # 2. Lógica de MikroTik (si es static y tiene IP)
+    # 2. Lógica de MikroTik (si es static y tiene IP, o pppoe con secret)
     if client.tipo == "static" and client.static_ip:
         try:
             suspend_ip_in_firewall(client.router, client.static_ip.ip, client.nombre)
@@ -679,6 +974,25 @@ def suspend_client(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Fallo al aplicar suspensión en MikroTik: {str(e)}"
+            )
+    elif client.tipo == "pppoe" and client.pppoe_secret:
+        try:
+            password_dec = decrypt_secret(client.pppoe_secret.contraseña_ppp)
+            profile_name = client.pppoe_secret.perfil.nombre if client.pppoe_secret.perfil else "default"
+            sync_pppoe_secret_in_router(
+                router=client.router,
+                username=client.pppoe_secret.usuario_ppp,
+                password=password_dec,
+                profile_name=profile_name,
+                client_name=client.nombre,
+                disabled=True
+            )
+            disconnect_pppoe_session(client.router, client.pppoe_secret.usuario_ppp)
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Fallo al aplicar suspensión en MikroTik para cuenta PPPoE: {str(e)}"
             )
 
     # 3. Crear registro de log
@@ -733,7 +1047,7 @@ def reactivate_client(
     if suspended_plan:
         suspended_plan.estado = "activo"
 
-    # 2. Lógica de MikroTik (si es static y tiene IP)
+    # 2. Lógica de MikroTik (si es static y tiene IP, o pppoe con secret)
     if client.tipo == "static" and client.static_ip:
         try:
             unsuspend_ip_in_firewall(client.router, client.static_ip.ip)
@@ -743,6 +1057,24 @@ def reactivate_client(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Fallo al revertir suspensión en MikroTik: {str(e)}"
+            )
+    elif client.tipo == "pppoe" and client.pppoe_secret:
+        try:
+            password_dec = decrypt_secret(client.pppoe_secret.contraseña_ppp)
+            profile_name = client.pppoe_secret.perfil.nombre if client.pppoe_secret.perfil else "default"
+            sync_pppoe_secret_in_router(
+                router=client.router,
+                username=client.pppoe_secret.usuario_ppp,
+                password=password_dec,
+                profile_name=profile_name,
+                client_name=client.nombre,
+                disabled=False
+            )
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Fallo al reactivar cuenta PPPoE en MikroTik: {str(e)}"
             )
 
     # 3. Actualizar registro de log activo (el último con fecha_reactivacion nula)

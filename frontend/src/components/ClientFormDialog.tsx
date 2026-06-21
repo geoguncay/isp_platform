@@ -58,6 +58,9 @@ const clientSchema = z.object({
   ip: z.string().optional().nullable(),
   mac: z.string().optional().nullable(),
   notas_ip: z.string().optional().nullable(),
+  usuario_ppp: z.string().optional().nullable(),
+  contraseña_ppp: z.string().optional().nullable(),
+  perfil_id: z.string().optional().nullable(),
   email: z.string().email('Ingrese un correo válido').optional().or(z.literal('')),
   created_at: z.string().optional().nullable(),
   // Campos ficticios para Paso 2 (Facturación y Notificaciones)
@@ -113,13 +116,35 @@ const clientSchema = z.object({
     }
   }
 
-  // 2. Validar IP obligatoria para tipo estática
+  // 2. Validar IP obligatoria para tipo estática, o credenciales para PPPoE
   if (data.tipo === 'static' && (!data.ip || data.ip.trim() === '')) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'La dirección IP es obligatoria',
       path: ['ip'],
     })
+  } else if (data.tipo === 'pppoe') {
+    if (!data.usuario_ppp || data.usuario_ppp.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'El usuario PPPoE es obligatorio',
+        path: ['usuario_ppp'],
+      })
+    }
+    if (!data.contraseña_ppp || data.contraseña_ppp.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'La contraseña PPPoE es obligatoria',
+        path: ['contraseña_ppp'],
+      })
+    }
+    if (!data.plan_id || data.plan_id.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Debe seleccionar un plan para la conexión PPPoE',
+        path: ['plan_id'],
+      })
+    }
   }
 })
 
@@ -143,6 +168,11 @@ interface FormClient {
     ip: string
     mac?: string | null
     notas?: string | null
+  } | null
+  pppoe_secret?: {
+    usuario_ppp: string
+    contraseña_ppp: string
+    perfil_id: string
   } | null
 }
 
@@ -194,6 +224,9 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
     enabled: open,
   })
 
+  const selectedRouterId = watch('router_id')
+
+
   const handleGetLocation = useCallback(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -230,6 +263,9 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           ip: client.static_ip?.ip ?? '',
           mac: client.static_ip?.mac ?? '',
           notas_ip: client.static_ip?.notas ?? '',
+          usuario_ppp: client.pppoe_secret?.usuario_ppp ?? '',
+          contraseña_ppp: client.pppoe_secret?.contraseña_ppp ?? '',
+          perfil_id: client.pppoe_secret?.perfil_id ?? '',
           email: client.email ?? '',
           created_at: client.created_at ? client.created_at.split('T')[0] : '',
           dia_pago: '5',
@@ -260,6 +296,9 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           ip: '',
           mac: '',
           notas_ip: '',
+          usuario_ppp: '',
+          contraseña_ppp: '',
+          perfil_id: '',
           email: '',
           created_at: todayStr,
           dia_pago: '5',
@@ -308,6 +347,9 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
         if (!macStr || macStr.trim() === '') payload.mac = null
         const notasIpStr = payload.notas_ip as string | null | undefined
         if (!notasIpStr || notasIpStr.trim() === '') payload.notas_ip = null
+        payload.usuario_ppp = null
+        payload.contraseña_ppp = null
+        payload.perfil_id = null
       }
 
       if (isEdit) {
@@ -840,6 +882,34 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                         {...register('notas_ip')}
                         className="input-field"
                       />
+                    </div>
+                  </div>
+                )}
+
+                {/* Campos condicionales para PPPoE */}
+                {watch('tipo') === 'pppoe' && (
+                  <div className="space-y-4 border-l-2 border-brand-500 pl-4 py-1.5 mt-2 bg-brand-500/5 rounded-r-lg pr-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-1.5">Usuario PPPoE *</label>
+                        <input
+                          type="text"
+                          placeholder="juan.perez"
+                          {...register('usuario_ppp')}
+                          className="input-field font-mono"
+                        />
+                        {errors.usuario_ppp && <p className="text-xs text-destructive mt-1">{errors.usuario_ppp.message}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-1.5">Contraseña PPPoE *</label>
+                        <input
+                          type="text"
+                          placeholder="p4ssw0rd"
+                          {...register('contraseña_ppp')}
+                          className="input-field font-mono"
+                        />
+                        {errors.contraseña_ppp && <p className="text-xs text-destructive mt-1">{errors.contraseña_ppp.message}</p>}
+                      </div>
                     </div>
                   </div>
                 )}

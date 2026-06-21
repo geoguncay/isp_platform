@@ -135,12 +135,12 @@ isp-platform/
 
 ### 3.1 Monitoreo en tiempo real
 
-- [ ] Colector de tráfico: polling RouterOS API cada 5 s → guardar en tabla `traffic_samples` (PostgreSQL particionado por mes)
-- [ ] WebSocket endpoint `/ws/traffic/{router_id}` — push de métricas al frontend
-- [ ] UI: dashboard principal con gráficos en tiempo real por router (Recharts)
-- [ ] UI: top 10 clientes por consumo en el momento actual
-- [ ] Histórico: tráfico por cliente — últimas 1h, 24h, 7d, 30d
-- [ ] Endpoint `GET /clients/{id}/traffic?range=24h` — datos para gráfico de consumo individual
+- [x] Colector de tráfico: polling RouterOS API cada 5 s → guardar en tabla `traffic_samples` (PostgreSQL particionado por mes)
+- [x] WebSocket endpoint `/ws/traffic/{router_id}` — push de métricas al frontend
+- [x] UI: dashboard principal con gráficos en tiempo real por router (Recharts)
+- [x] UI: top 10 clientes por consumo en el momento actual
+- [x] Histórico: tráfico por cliente — últimas 1h, 24h, 7d, 30d
+- [x] Endpoint `GET /clients/{id}/traffic?range=24h` — datos para gráfico de consumo individual
 
 ### 3.2 Sistema de alertas
 
@@ -155,14 +155,14 @@ isp-platform/
 
 ### 3.3 Gestión PPPoE
 
-- [ ] Modelo `PPPoEProfile`: nombre, velocidad_down, velocidad_up, router_id (sincronizado desde MikroTik)
-- [ ] Modelo `PPPoESecret`: cliente_id, usuario_ppp, contraseña_ppp (Fernet), perfil_id, router_id
-- [ ] Servicio: crear / editar / eliminar `/ppp secret` en RouterOS al gestionar cliente PPPoE
-- [ ] Servicio: listar sesiones activas `/ppp active` — IP asignada, tiempo conectado, bytes TX/RX
-- [ ] Sincronizar perfiles PPPoE desde RouterOS al registrar un router nuevo
-- [ ] Endpoint `DELETE /pppoe/sessions/{username}`: desconectar sesión activa
-- [ ] UI: pestaña PPPoE en perfil de cliente — credenciales, sesión activa, opción de desconectar
-- [ ] UI: vista global de sesiones PPPoE activas en todos los routers
+- [x] Modelo `PPPoEProfile`: nombre, velocidad_down, velocidad_up, router_id (sincronizado desde MikroTik)
+- [x] Modelo `PPPoESecret`: cliente_id, usuario_ppp, contraseña_ppp (Fernet), perfil_id, router_id
+- [x] Servicio: crear / editar / eliminar `/ppp secret` en RouterOS al gestionar cliente PPPoE
+- [x] Servicio: listar sesiones activas `/ppp active` — IP asignada, tiempo conectado, bytes TX/RX
+- [x] Sincronizar perfiles PPPoE desde RouterOS al registrar un router nuevo
+- [x] Endpoint `DELETE /pppoe/sessions/{username}`: desconectar sesión activa
+- [x] UI: pestaña PPPoE en perfil de cliente — credenciales, sesión activa, opción de desconectar
+- [x] UI: vista global de sesiones PPPoE activas en todos los routers
 
 ---
 
@@ -240,75 +240,73 @@ isp-platform/
 
 ### Backend
 
-| Componente | Tecnología | Versión | Uso |
-|---|---|---|---|
-| Lenguaje | Python | 3.12+ | Runtime principal |
-| Framework API | FastAPI | 0.111+ | REST + WebSocket |
-| ORM | SQLAlchemy | 2.0+ | Modelos y queries |
-| Migraciones | Alembic | 1.13+ | Control de esquema BD |
-| Validación | Pydantic v2 | 2.7+ | Schemas + Settings |
-| Auth | python-jose + passlib | — | JWT + bcrypt |
-| Cifrado | cryptography (Fernet) | 42+ | Credenciales de routers |
-| RouterOS API | librouteros | 3.2+ | Comunicación MikroTik |
-| Jobs async | Celery + Redis | 5.3+ | Cron, alertas, colector |
-| WebSockets | FastAPI WebSocket | — | Tráfico en tiempo real |
-| PDF | WeasyPrint | 62+ | Reportes + RIDE SRI |
-| Excel | openpyxl | 3.1+ | Exportación de reportes |
-| Firma XML | signxml | 3.2+ | Facturas electrónicas SRI |
-| SOAP SRI | zeep | 4.2+ | Comunicación SRI |
-| Notif. SMS/WA | Twilio SDK | — | Alertas a clientes |
-| Email | FastAPI-Mail | — | Notificaciones SMTP |
-| Tests | pytest + httpx | — | Unit + integration tests |
-| Linting | Ruff + Black | — | Calidad de código |
+| Componente    | Tecnología            | Versión | Uso                       |
+| ------------- | --------------------- | ------- | ------------------------- |
+| Lenguaje      | Python                | 3.12+   | Runtime principal         |
+| Framework API | FastAPI               | 0.111+  | REST + WebSocket          |
+| ORM           | SQLAlchemy            | 2.0+    | Modelos y queries         |
+| Migraciones   | Alembic               | 1.13+   | Control de esquema BD     |
+| Validación    | Pydantic v2           | 2.7+    | Schemas + Settings        |
+| Auth          | python-jose + passlib | —       | JWT + bcrypt              |
+| Cifrado       | cryptography (Fernet) | 42+     | Credenciales de routers   |
+| RouterOS API  | librouteros           | 3.2+    | Comunicación MikroTik     |
+| Jobs async    | Celery + Redis        | 5.3+    | Cron, alertas, colector   |
+| WebSockets    | FastAPI WebSocket     | —       | Tráfico en tiempo real    |
+| PDF           | WeasyPrint            | 62+     | Reportes + RIDE SRI       |
+| Excel         | openpyxl              | 3.1+    | Exportación de reportes   |
+| Firma XML     | signxml               | 3.2+    | Facturas electrónicas SRI |
+| SOAP SRI      | zeep                  | 4.2+    | Comunicación SRI          |
+| Notif. SMS/WA | Twilio SDK            | —       | Alertas a clientes        |
+| Email         | FastAPI-Mail          | —       | Notificaciones SMTP       |
+| Tests         | pytest + httpx        | —       | Unit + integration tests  |
+| Linting       | Ruff + Black          | —       | Calidad de código         |
 
 ### Base de datos
 
-| Componente | Tecnología | Uso |
-|---|---|---|
-| BD principal | PostgreSQL 16 | Clientes, routers, facturas |
-| Cache / sesiones | Redis 7 | JWT, colas Celery, health checks |
-| Migraciones | Alembic | Versionado de esquema |
-| Historial tráfico | PostgreSQL (particiones por mes) | Series de tiempo de consumo |
+| Componente        | Tecnología                       | Uso                              |
+| ----------------- | -------------------------------- | -------------------------------- |
+| BD principal      | PostgreSQL 16                    | Clientes, routers, facturas      |
+| Cache / sesiones  | Redis 7                          | JWT, colas Celery, health checks |
+| Migraciones       | Alembic                          | Versionado de esquema            |
+| Historial tráfico | PostgreSQL (particiones por mes) | Series de tiempo de consumo      |
 
 ### Frontend
 
-| Componente | Tecnología | Versión | Uso |
-|---|---|---|---|
-| Framework | React | 18+ | UI principal |
-| Lenguaje | TypeScript | 5+ | Tipado estático |
-| Build tool | Vite | 5+ | Dev server + build |
-| Estilos | Tailwind CSS | 3.4+ | Utilidades CSS |
-| Componentes UI | shadcn/ui | — | Componentes sobre Tailwind |
-| Iconos | Lucide React | — | Iconografía |
-| Routing | React Router v6 | — | Navegación SPA |
-| Estado global | Zustand | — | Estado de la app |
-| Server state | TanStack Query | 5+ | Cache + fetching de datos |
-| Gráficos | Recharts | — | Tráfico, consumo, ingresos |
-| Mapas | Leaflet + react-leaflet | — | GPS de clientes |
-| Formularios | React Hook Form + Zod | — | Validación en cliente |
-| Tablas | TanStack Table | — | Listados con filtros |
-| WebSocket | native browser API | — | Tráfico en tiempo real |
+| Componente     | Tecnología              | Versión | Uso                        |
+| -------------- | ----------------------- | ------- | -------------------------- |
+| Framework      | React                   | 18+     | UI principal               |
+| Lenguaje       | TypeScript              | 5+      | Tipado estático            |
+| Build tool     | Vite                    | 5+      | Dev server + build         |
+| Estilos        | Tailwind CSS            | 3.4+    | Utilidades CSS             |
+| Componentes UI | shadcn/ui               | —       | Componentes sobre Tailwind |
+| Iconos         | Lucide React            | —       | Iconografía                |
+| Routing        | React Router v6         | —       | Navegación SPA             |
+| Estado global  | Zustand                 | —       | Estado de la app           |
+| Server state   | TanStack Query          | 5+      | Cache + fetching de datos  |
+| Gráficos       | Recharts                | —       | Tráfico, consumo, ingresos |
+| Mapas          | Leaflet + react-leaflet | —       | GPS de clientes            |
+| Formularios    | React Hook Form + Zod   | —       | Validación en cliente      |
+| Tablas         | TanStack Table          | —       | Listados con filtros       |
+| WebSocket      | native browser API      | —       | Tráfico en tiempo real     |
 
 ### App móvil
 
-| Componente | Tecnología | Uso |
-|---|---|---|
-| Framework | React Native + Expo | App iOS y Android |
-| Lenguaje | TypeScript | Tipado estático |
-| Navegación | React Navigation v6 | Pantallas y tabs |
-| Estilos | NativeWind (Tailwind para RN) | Clases utilitarias |
-| Push notifications | Expo Notifications | Alertas críticas |
-| Storage seguro | Expo SecureStore | JWT tokens |
+| Componente         | Tecnología                    | Uso                |
+| ------------------ | ----------------------------- | ------------------ |
+| Framework          | React Native + Expo           | App iOS y Android  |
+| Lenguaje           | TypeScript                    | Tipado estático    |
+| Navegación         | React Navigation v6           | Pantallas y tabs   |
+| Estilos            | NativeWind (Tailwind para RN) | Clases utilitarias |
+| Push notifications | Expo Notifications            | Alertas críticas   |
+| Storage seguro     | Expo SecureStore              | JWT tokens         |
 
 ### Infraestructura y DevOps
 
-| Componente | Tecnología | Uso |
-|---|---|---|
-| Contenedores | Docker + Docker Compose | Dev y producción |
-| Proxy inverso | Nginx | SSL, routing, static files |
-| CI/CD | GitHub Actions | Lint, tests, build |
-| Conectividad routers | ZeroTier VPN | Túnel seguro a MikroTik |
-| Secretos | python-dotenv + Pydantic Settings | Variables de entorno |
-| Monitoreo servidor | Uptime Kuma (self-hosted) | Health checks internos |
-
-
+| Componente           | Tecnología                        | Uso                        |
+| -------------------- | --------------------------------- | -------------------------- |
+| Contenedores         | Docker + Docker Compose           | Dev y producción           |
+| Proxy inverso        | Nginx                             | SSL, routing, static files |
+| CI/CD                | GitHub Actions                    | Lint, tests, build         |
+| Conectividad routers | ZeroTier VPN                      | Túnel seguro a MikroTik    |
+| Secretos             | python-dotenv + Pydantic Settings | Variables de entorno       |
+| Monitoreo servidor   | Uptime Kuma (self-hosted)         | Health checks internos     |

@@ -226,7 +226,7 @@ export function RouterProfilePage() {
   const { hideIps } = useSettingsStore()
   const isAdmin = user?.rol === 'admin'
 
-  const [activeTab, setActiveTab] = useState<'stats' | 'clients' | 'queues' | 'settings'>('stats')
+  const [activeTab, setActiveTab] = useState<'stats' | 'clients' | 'queues' | 'settings' | 'pppoe'>('stats')
   const [selectedQueue, setSelectedQueue] = useState<any | null>(null)
   const [selectedPlanId, setSelectedPlanId] = useState<string>('')
   const [searchTerm, setSearchTerm] = useState('')
@@ -458,12 +458,54 @@ export function RouterProfilePage() {
     }
   })
 
+  // Consultar sesiones PPPoE activas
+  const { data: pppoeSessions = [], isLoading: isLoadingSessions, refetch: refetchSessions } = useQuery<any[]>({
+    queryKey: ['router-pppoe-sessions', id],
+    queryFn: async () => {
+      const { data } = await api.get(`/routers/${id}/pppoe-sessions`)
+      return data
+    },
+    enabled: activeTab === 'pppoe',
+    refetchInterval: activeTab === 'pppoe' ? 8000 : undefined,
+  })
+
+  // Mutación para desconectar sesión activa
+  const disconnectSessionMutation = useMutation({
+    mutationFn: async (username: string) => {
+      await api.delete(`/routers/${id}/pppoe-sessions/${username}`)
+    },
+    onSuccess: () => {
+      refetchSessions()
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.detail || 'Error al desconectar la sesión'
+      alert(msg)
+    }
+  })
+
+  // Mutación para sincronizar perfiles PPPoE
+  const syncProfilesMutation = useMutation({
+    mutationFn: async () => {
+      await api.post(`/routers/${id}/sync-pppoe-profiles`)
+    },
+    onSuccess: () => {
+      refetchRouter()
+      alert('Perfiles PPPoE sincronizados correctamente.')
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.detail || 'Error al sincronizar perfiles PPPoE'
+      alert(msg)
+    }
+  })
+
   // Función para sincronizar de manera completa todos los datos
   const handleSyncAll = () => {
     refetchRouter()
     refetchQueues()
+    refetchSessions()
     queryClient.invalidateQueries({ queryKey: ['router', id] })
     queryClient.invalidateQueries({ queryKey: ['router-queues', id] })
+    queryClient.invalidateQueries({ queryKey: ['router-pppoe-sessions', id] })
   }
 
   if (isLoadingRouter) {
@@ -745,6 +787,7 @@ export function RouterProfilePage() {
               { id: 'stats', label: 'Estadísticas', icon: Network },
               { id: 'clients', label: 'Clientes Asociados', icon: Users },
               { id: 'queues', label: 'Colas de Tráfico', icon: Activity },
+              { id: 'pppoe', label: 'Sesiones PPPoE', icon: Wifi },
               { id: 'settings', label: 'Diagnóstico', icon: Sliders },
             ].map((tab) => {
               const Icon = tab.icon
@@ -935,9 +978,9 @@ export function RouterProfilePage() {
           {/* Pestaña: Clientes */}
           {activeTab === 'clients' && (
             <div className="space-y-4">
-              {/* Barra de Búsqueda */}
-              <div className="flex gap-3">
-                <div className="relative flex-grow">
+              {/* Barra de Búsqueda y Acciones */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="relative flex-grow max-w-md">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
                     type="text"
@@ -947,6 +990,23 @@ export function RouterProfilePage() {
                     className="input-field pl-10"
                   />
                 </div>
+                {isAdmin && (
+                  <div>
+                    {router.status === 'online' ? (
+                      <button
+                        onClick={() => setImportingOpen(true)}
+                        className="btn-secondary text-brand-400 hover:text-brand-300 text-xs py-2 px-3 flex items-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Importar desde Address-list
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground bg-secondary/40 py-2 px-3 rounded-lg border border-border/20" title="El router debe estar En línea para permitir la importación automática de clientes.">
+                        Router fuera de línea (sin importación)
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {paginatedClientsData.items.length === 0 ? (
@@ -1214,31 +1274,6 @@ export function RouterProfilePage() {
                 )}
               </div>
 
-              {/* Acciones de MikroTik */}
-              {isAdmin && (
-                <div className="glass-card p-5 space-y-4 border border-border/40">
-                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 border-b border-border/40 pb-2.5">
-                    <Network className="w-4 h-4 text-brand-400" />
-                    Acciones de Red
-                  </h3>
-
-                  <div className="flex flex-wrap gap-3">
-                    {router.status === 'online' ? (
-                      <button
-                        onClick={() => setImportingOpen(true)}
-                        className="btn-secondary text-brand-400 hover:text-brand-300"
-                      >
-                        <Download className="w-4 h-4" />
-                        Importar Clientes desde Address-list
-                      </button>
-                    ) : (
-                      <div className="text-xs text-muted-foreground bg-secondary/40 p-3 rounded-lg w-full">
-                        El router debe estar <strong>En línea</strong> para permitir la importación automática de clientes.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
 
               {/* Zona Peligrosa */}
               {isAdmin && (
@@ -1256,6 +1291,98 @@ export function RouterProfilePage() {
                   >
                     Desactivar y Eliminar Router
                   </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Pestaña: Sesiones PPPoE Activas */}
+          {activeTab === 'pppoe' && (
+            <div className="space-y-6 font-sans animate-fade-in">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-border/40 pb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Sesiones PPPoE en tiempo real</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Monitoreo de clientes conectados por túnel PPPoE en este router.
+                  </p>
+                </div>
+                
+                {isAdmin && (
+                  <button
+                    onClick={() => {
+                      if (confirm('¿Deseas sincronizar los perfiles PPPoE desde el router MikroTik?')) {
+                        syncProfilesMutation.mutate()
+                      }
+                    }}
+                    disabled={syncProfilesMutation.isPending}
+                    className="btn-secondary text-xs h-auto py-1.5"
+                  >
+                    {syncProfilesMutation.isPending ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    )}
+                    Sincronizar Perfiles
+                  </button>
+                )}
+              </div>
+
+              {router.status !== 'online' ? (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 text-xs text-amber-500 font-sans flex items-start gap-2.5">
+                  <AlertCircle className="w-4.5 h-4.5 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <span>El router se encuentra fuera de línea. No se pueden recuperar las sesiones PPPoE activas en este momento.</span>
+                </div>
+              ) : isLoadingSessions ? (
+                <div className="text-center py-12 text-muted-foreground flex items-center justify-center gap-2">
+                  <RefreshCw className="w-5 h-5 animate-spin text-primary" />
+                  <span>Cargando sesiones PPPoE activas...</span>
+                </div>
+              ) : pppoeSessions.length === 0 ? (
+                <div className="glass-card p-8 text-center text-muted-foreground font-sans border border-border/40">
+                  No hay sesiones PPPoE activas en este momento.
+                </div>
+              ) : (
+                <div className="overflow-x-auto border border-border/40 rounded-lg">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Usuario</th>
+                        <th>Dirección IP</th>
+                        <th>Uptime / Tiempo Conectado</th>
+                        <th>Dirección MAC</th>
+                        <th>Tráfico (Descarga ↓ / Subida ↑)</th>
+                        <th>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pppoeSessions.map((session) => (
+                        <tr key={session.id || session.username}>
+                          <td className="font-semibold text-foreground text-sm font-mono">{session.username}</td>
+                          <td className="font-mono text-xs">{session.ip_address || '—'}</td>
+                          <td className="text-xs text-muted-foreground font-mono">{session.uptime || '—'}</td>
+                          <td className="text-xs text-muted-foreground font-mono">{session.caller_id || '—'}</td>
+                          <td className="text-xs font-mono">
+                            <span className="text-emerald-400 font-semibold block">↓ {session.bytes_rx_human || '0 B'}</span>
+                            <span className="text-blue-400 font-semibold block">↑ {session.bytes_tx_human || '0 B'}</span>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (confirm(`¿Estás seguro de que deseas expulsar (kick) al usuario ${session.username}?`)) {
+                                  disconnectSessionMutation.mutate(session.username)
+                                }
+                              }}
+                              disabled={disconnectSessionMutation.isPending}
+                              className="text-xs font-bold px-2.5 py-1.5 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 active:scale-[0.98] transition-all"
+                            >
+                              Kick
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>

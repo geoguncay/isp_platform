@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, Uuid, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
@@ -47,6 +47,10 @@ class Router(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    # Relaciones PPPoE
+    pppoe_profiles = relationship("PPPoEProfile", back_populates="router", cascade="all, delete-orphan")
+    pppoe_secrets = relationship("PPPoESecret", back_populates="router", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Router id={self.id} nombre={self.nombre} ip={self.ip}>"

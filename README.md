@@ -2,6 +2,10 @@
 
 > **Sistema de gestión centralizada para ISPs / WISPs** con integración MikroTik RouterOS API, facturación electrónica ecuatoriana (SRI) y monitoreo en tiempo real.
 
+## Documentación
+
+- [Guía del proyecto](docs/GUIA_DEL_PROYECTO.md): visión general, stack, módulos, variables de entorno y arranque.
+
 ---
 
 ## 🗺️ Arquitectura del Sistema
@@ -11,12 +15,15 @@ El sistema está diseñado para interactuar de forma segura y eficiente con múl
 A continuación se detallan los diagramas de arquitectura utilizando el flujo de referencia con ZeroTier:
 
 ### 1. Vista General de la Arquitectura
+
 ![Vista General](architecture/isp_arch_overview.svg)
 
 ### 2. Flujo de Comunicación de Red
+
 ![Flujo de Red](architecture/isp_arch_network_flow.svg)
 
 ### 3. Lógica Interna del Backend
+
 ![Lógica del Backend](architecture/isp_arch_backend_internals.svg)
 
 ---
@@ -26,27 +33,30 @@ A continuación se detallan los diagramas de arquitectura utilizando el flujo de
 El proyecto está estructurado como un monorepo para facilitar la gestión conjunta de todos los servicios.
 
 ### Backend (API & Workers)
-* **Lenguaje:** Python 3.12+
-* **Framework:** FastAPI (REST + WebSockets)
-* **Base de Datos:** PostgreSQL 16 (con particionado mensual para muestras de tráfico)
-* **Caché y Mensajería:** Redis 7 (broker de Celery y almacén de sesiones activas)
-* **Tareas Asíncronas:** Celery & Celery Beat (health check periódico, recolección de tráfico, suspensiones automáticas)
-* **Conectividad MikroTik:** `librouteros` (Pool de conexiones persistentes con reconexión automática)
-* **ORM & Migraciones:** SQLAlchemy 2.0+ & Alembic 1.13+
-* **Seguridad:** Cifrado Fernet para credenciales de routers y hashes de contraseñas de usuarios con bcrypt directo.
+
+- **Lenguaje:** Python 3.12+
+- **Framework:** FastAPI (REST + WebSockets)
+- **Base de Datos:** PostgreSQL 16 (con particionado mensual para muestras de tráfico)
+- **Caché y Mensajería:** Redis 7 (broker de Celery y almacén de sesiones activas)
+- **Tareas Asíncronas:** Celery & Celery Beat (health check periódico, recolección de tráfico, suspensiones automáticas)
+- **Conectividad MikroTik:** `librouteros` (Pool de conexiones persistentes con reconexión automática)
+- **ORM & Migraciones:** SQLAlchemy 2.0+ & Alembic 1.13+
+- **Seguridad:** Cifrado Fernet para credenciales de routers y hashes de contraseñas de usuarios con bcrypt directo.
 
 ### Frontend (Panel Administrativo Web)
-* **Framework:** React 18+ (Vite 5+ & TypeScript 5+)
-* **Estilos:** Tailwind CSS 3.4+ & Componentes interactivos de **shadcn/ui**
-* **Manejo de Estado:** Zustand (estado global) & TanStack Query v5 (caché e interactividad con el servidor)
-* **Gráficos:** Recharts (tráfico en tiempo real y consumo de datos)
-* **Mapas:** Leaflet (georreferenciación de clientes)
-* **Formularios:** React Hook Form + validaciones estructuradas con Zod
+
+- **Framework:** React 18+ (Vite 5+ & TypeScript 5+)
+- **Estilos:** Tailwind CSS 3.4+ & Componentes interactivos de **shadcn/ui**
+- **Manejo de Estado:** Zustand (estado global) & TanStack Query v5 (caché e interactividad con el servidor)
+- **Gráficos:** Recharts (tráfico en tiempo real y consumo de datos)
+- **Mapas:** Leaflet (georreferenciación de clientes)
+- **Formularios:** React Hook Form + validaciones estructuradas con Zod
 
 ### Aplicación Móvil (Técnicos de Campo)
-* **Framework:** React Native + Expo (Expo Router para navegación orientada a archivos)
-* **Estilos:** NativeWind (Tailwind CSS para componentes nativos)
-* **Seguridad:** Almacenamiento local seguro con Expo SecureStore
+
+- **Framework:** React Native + Expo (Expo Router para navegación orientada a archivos)
+- **Estilos:** NativeWind (Tailwind CSS para componentes nativos)
+- **Seguridad:** Almacenamiento local seguro con Expo SecureStore
 
 ---
 
@@ -84,6 +94,7 @@ El proyecto incluye un entorno Docker optimizado que arranca todas las dependenc
 
 1. **Configurar el entorno:**
    Copia el archivo `.env.example` de la raíz a `.env` y define las variables de entorno principales (como las llaves de encriptación y base de datos):
+
    ```bash
    cp .env.example .env
    ```
@@ -94,11 +105,12 @@ El proyecto incluye un entorno Docker optimizado que arranca todas las dependenc
    ```
 
 Este comando iniciará:
-* **API Backend** en [http://localhost:8000](http://localhost:8000)
-* **Frontend Web** en [http://localhost:5173](http://localhost:5173)
-* **Adminer (Gestor DB)** en [http://localhost:8080](http://localhost:8080)
-* **Redis y PostgreSQL** como bases de datos
-* **Celery Worker & Beat** ejecutando tareas en segundo plano
+
+- **API Backend** en [http://localhost:8000](http://localhost:8000)
+- **Frontend Web** en [http://localhost:5173](http://localhost:5173)
+- **Adminer (Gestor DB)** en [http://localhost:8080](http://localhost:8080)
+- **Redis y PostgreSQL** como bases de datos
+- **Celery Worker & Beat** ejecutando tareas en segundo plano
 
 ---
 
@@ -109,6 +121,7 @@ Si prefieres ejecutar el código directamente en tu host local para un ciclo de 
 ### Configuración del Backend
 
 1. **Crear e iniciar el entorno virtual:**
+
    ```bash
    cd backend
    python3 -m venv .venv
@@ -116,6 +129,7 @@ Si prefieres ejecutar el código directamente en tu host local para un ciclo de 
    ```
 
 2. **Instalar dependencias:**
+
    ```bash
    pip install -r requirements.txt
    ```
@@ -124,11 +138,12 @@ Si prefieres ejecutar el código directamente en tu host local para un ciclo de 
    ```bash
    uvicorn app.main:lifespan_app --reload --port 8000
    ```
-   *(Nota: Asegúrate de tener instancias de PostgreSQL y Redis corriendo localmente y configuradas en el archivo `.env` del backend).*
+   _(Nota: Asegúrate de tener instancias de PostgreSQL y Redis corriendo localmente y configuradas en el archivo `.env` del backend)._
 
 ### Configuración del Frontend
 
 1. **Navegar e instalar paquetes de Node:**
+
    ```bash
    cd frontend
    npm install
@@ -148,6 +163,7 @@ El backend cuenta con una completa suite de pruebas unitarias que validan la aut
 Para correr las pruebas localmente usando una base de datos en memoria SQLite y mockeando Redis:
 
 1. Instala las dependencias de testing:
+
    ```bash
    cd backend
    pip install -r requirements-test.txt
@@ -162,6 +178,6 @@ Para correr las pruebas localmente usando una base de datos en memoria SQLite y 
 
 ## 🔒 Seguridad y Configuración Clave
 
-* **Cifrado Fernet:** Las contraseñas de las APIs de MikroTik se almacenan cifradas en la base de datos PostgreSQL utilizando una clave AES Fernet única declarada en la variable `FERNET_KEY`. Nunca compartas ni pierdas esta variable en entornos de producción.
-* **Seed de Administrador:** En el primer arranque, la aplicación autogenerará un usuario administrador inicial utilizando las credenciales provistas en el archivo `.env` (`ADMIN_SEED_EMAIL`, `ADMIN_SEED_PASSWORD`).
-* **Endpoints de Auto-Configuración:** El sistema expone el endpoint `POST /api/auth/setup` para inicializar el administrador principal en instalaciones nuevas donde no exista ningún usuario en base de datos.
+- **Cifrado Fernet:** Las contraseñas de las APIs de MikroTik se almacenan cifradas en la base de datos PostgreSQL utilizando una clave AES Fernet única declarada en la variable `FERNET_KEY`. Nunca compartas ni pierdas esta variable en entornos de producción.
+- **Seed de Administrador:** En el primer arranque, la aplicación autogenerará un usuario administrador inicial utilizando las credenciales provistas en el archivo `.env` (`ADMIN_SEED_EMAIL`, `ADMIN_SEED_PASSWORD`).
+- **Endpoints de Auto-Configuración:** El sistema expone el endpoint `POST /api/auth/setup` para inicializar el administrador principal en instalaciones nuevas donde no exista ningún usuario en base de datos.

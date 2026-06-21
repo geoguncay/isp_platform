@@ -11,6 +11,13 @@ from app.core.security import decrypt_secret, encrypt_secret
 from app.models.router import Router
 from app.models.client import Client
 from app.models.static_ip import StaticIP
+from app.models.pppoe_profile import PPPoEProfile
+from app.schemas.pppoe import PPPoEProfileRead, PPPoESessionActive
+from app.services.mikrotik.pppoe import (
+    sync_pppoe_profiles_from_router,
+    fetch_active_pppoe_sessions,
+    disconnect_pppoe_session,
+)
 from app.services.mikrotik.address_list import fetch_clients_from_address_list
 from app.services.mikrotik.queue import fetch_queues, get_parent_queue_limit, update_parent_queue_limit
 from app.schemas.router import (
@@ -521,4 +528,80 @@ def set_parent_queue_limit(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Fallo al aplicar cambios en el router: {str(e)}"
+        )
+
+
+@router.post("/{router_id}/sync-pppoe-profiles", response_model=dict)
+def sync_router_pppoe_profiles(router_id: uuid.UUID, db: DBSession, _: AdminOnly) -> dict:
+    """
+    Sincroniza perfiles PPPoE desde el router MikroTik y los guarda en la base de datos.
+    """
+    r = db.get(Router, router_id)
+    if not r or not r.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Router no encontrado")
+    
+    try:
+        count = sync_pppoe_profiles_from_router(db, r)
+        return {"status": "success", "message": f"Sincronizados {count} perfiles PPPoE exitosamente."}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Fallo al conectar con el router MikroTik: {str(e)}"
+        )
+
+
+@router.get("/{router_id}/pppoe-profiles", response_model=list[PPPoEProfileRead])
+def get_router_pppoe_profiles(router_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -> list:
+    """
+    Devuelve los perfiles PPPoE guardados en la BD para el router especificado.
+    """
+    r = db.get(Router, router_id)
+    if not r or not r.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Router no encontrado")
+    
+    return db.query(PPPoEProfile).filter(PPPoEProfile.router_id == router_id).order_by(PPPoEProfile.nombre).all()
+
+
+@router.get("/{router_id}/pppoe-sessions", response_model=list[PPPoESessionActive])
+def get_router_pppoe_sessions(router_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -> list:
+    """
+    Obtiene la lista de sesiones PPPoE activas en tiempo real desde el router.
+    """
+    r = db.get(Router, router_id)
+    if not r or not r.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Router no encontrado")
+    
+    try:
+        return fetch_active_pppoe_sessions(r)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Fallo al obtener sesiones activas desde el router MikroTik: {str(e)}"
+        )
+
+
+@router.delete("/{router_id}/pppoe-sessions/{username}", response_model=dict)
+def delete_router_pppoe_session(router_id: uuid.UUID, username: str, db: DBSession, _: AdminOrTecnico) -> dict:
+    """
+    Desconecta una sesión PPPoE activa (kick) en el router especificado.
+    """
+    r = db.get(Router, router_id)
+    if not r or not r.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Router no encontrado")
+    
+    try:
+        success = disconnect_pppoe_session(r, username)
+        if success:
+            return {"status": "success", "message": f"Sesión del usuario {username} desconectada."}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No se encontró una sesión activa para el usuario {username}."
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Fallo al desconectar la sesión activa: {str(e)}"
         )
