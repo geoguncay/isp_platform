@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { User, Building, Lock, Save, Loader2, CheckCircle2, XCircle, Globe, Phone, MapPin, Hash, Mail, Upload } from 'lucide-react'
+import { User, Building, Lock, Save, Loader2, CheckCircle2, XCircle, Globe, Phone, MapPin, Hash, Mail, Upload, Users, Bell } from 'lucide-react'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/authStore'
 import { getLogoUrl } from '@/components/AppLayout'
@@ -44,7 +44,7 @@ type CompanyFormData = z.infer<typeof companySchema>
 export function ProfilePage() {
   const { user, fetchMe } = useAuthStore()
   const isAdmin = user?.rol === 'admin'
-  const [activeTab, setActiveTab] = useState<'profile' | 'company'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'company' | 'users' | 'alerts'>('profile')
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const queryClient = useQueryClient()
 
@@ -216,7 +216,7 @@ export function ProfilePage() {
       </div>
 
       {/* Tabs Selector */}
-      <div className="flex border-b border-border gap-2">
+      <div className="flex border-b border-border gap-2 flex-wrap">
         <button
           onClick={() => { setActiveTab('profile'); setStatusMessage(null); }}
           className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-all ${activeTab === 'profile'
@@ -239,6 +239,28 @@ export function ProfilePage() {
             Datos de la Empresa
           </button>
         )}
+        {isAdmin && (
+          <button
+            onClick={() => { setActiveTab('users'); setStatusMessage(null); }}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-all ${activeTab === 'users'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+          >
+            <Users className="w-4 h-4" />
+            Usuarios
+          </button>
+        )}
+        <button
+          onClick={() => { setActiveTab('alerts'); setStatusMessage(null); }}
+          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-all ${activeTab === 'alerts'
+            ? 'border-primary text-primary'
+            : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+        >
+          <Bell className="w-4 h-4" />
+          Alertas
+        </button>
       </div>
 
       {/* Status Alert */}
@@ -556,9 +578,8 @@ export function ProfilePage() {
                     <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3">
                       <label
                         htmlFor="logo-file-input"
-                        className={`btn-primary flex items-center gap-2 cursor-pointer text-xs py-2 px-4 select-none ${
-                          uploadingLogo ? 'opacity-50 pointer-events-none' : ''
-                        }`}
+                        className={`btn-primary flex items-center gap-2 cursor-pointer text-xs py-2 px-4 select-none ${uploadingLogo ? 'opacity-50 pointer-events-none' : ''
+                          }`}
                       >
                         <Upload className="w-4 h-4" />
                         Subir Imagen Logo
@@ -571,7 +592,7 @@ export function ProfilePage() {
                         onChange={handleLogoUpload}
                         disabled={uploadingLogo}
                       />
-                      
+
                       <button
                         type="button"
                         onClick={() => setShowManualUrl(!showManualUrl)}
@@ -623,6 +644,32 @@ export function ProfilePage() {
               </div>
             </form>
           )}
+        </div>
+      )}
+
+      {/* Users Tab (Placeholder) */}
+      {activeTab === 'users' && isAdmin && (
+        <div className="glass-card p-12 text-center max-w-xl mx-auto space-y-4 animate-fade-in">
+          <div className="w-16 h-16 bg-brand-500/10 rounded-full flex items-center justify-center mx-auto border border-brand-500/25">
+            <Users className="w-8 h-8 text-brand-400" />
+          </div>
+          <h3 className="text-lg font-semibold text-foreground">Gestión de Usuarios</h3>
+          <p className="text-muted-foreground text-sm">
+            Módulo de administración y creación de cuentas de usuarios... Próximamente en la siguiente fase.
+          </p>
+        </div>
+      )}
+
+      {/* Alerts Tab (Placeholder) */}
+      {activeTab === 'alerts' && (
+        <div className="glass-card p-12 text-center max-w-xl mx-auto space-y-4 animate-fade-in">
+          <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto border border-amber-500/25 animate-pulse">
+            <Bell className="w-8 h-8 text-amber-400" />
+          </div>
+          <h3 className="text-lg font-semibold text-foreground">Centro de Alertas</h3>
+          <p className="text-muted-foreground text-sm">
+            Panel consolidado de notificaciones de estado de enrutadores, latencia alta, y eventos del sistema. Próximamente (Fase 3).
+          </p>
         </div>
       )}
     </div>

@@ -28,6 +28,29 @@ A continuación se detallan los diagramas de arquitectura utilizando el flujo de
 
 ---
 
+## ✨ Características y Módulos Recientes
+
+La plataforma ha sido mejorada recientemente con varias características premium y de alto nivel:
+
+1. **Monitoreo de Tráfico Consolidado y Dinámico**
+   - **Gráfico Unificado**: Integra en un solo panel interactivo el tráfico **En vivo** (telemetría vía WebSockets de Redis) y el **historial de consumo** agrupado por temporalidades (1 hora, 24 horas, 7 días, 30 días).
+   - **Indicadores en Cabecera**: Muestra de forma dinámica la tasa de velocidad actual/promedio de descarga y subida, así como el **volumen total de datos descargados** calculado por integración matemática en base a las tasas de la temporalidad.
+   - **Listado de Clientes Expandido**: Tabla detallada de clientes activos que incluye velocidades de transmisión y columnas de volumen (**Vol. Descarga**, **Vol. Subida** y **Vol. Total**) perfectamente alineadas a la derecha con estilos responsivos.
+
+2. **Personalización de Marca y Carga de Logotipo**
+   - Panel dinámico para la actualización del nombre comercial de la empresa y carga del logotipo (formatos JPG, PNG, WEBP, SVG) con almacenamiento local y preview en tiempo real en la barra lateral.
+
+3. **Seguridad y Control de Sesión**
+   - Opción para configurar desconexión automática por inactividad del usuario (**Timeout de Inactividad**) en minutos, cerrando la sesión de forma proactiva al detectar desuso del mouse o teclado.
+
+4. **Gestión de Servicios Personalizados**
+   - Módulo completo para administrar cobros adicionales a clientes (soporte técnico, alquiler de enrutadores, servicios adicionales) con impuestos integrados y estado activo/inactivo.
+
+5. **Gestión PPPoE Automatizada**
+   - Creación y mapeo dinámico de perfiles PPPoE directamente en base al plan de ancho de banda seleccionado, evitando dependencias externas de sincronización manual de MikroTik.
+
+---
+
 ## 🛠️ Stack Tecnológico
 
 El proyecto está estructurado como un monorepo para facilitar la gestión conjunta de todos los servicios.
@@ -52,12 +75,6 @@ El proyecto está estructurado como un monorepo para facilitar la gestión conju
 - **Mapas:** Leaflet (georreferenciación de clientes)
 - **Formularios:** React Hook Form + validaciones estructuradas con Zod
 
-### Aplicación Móvil (Técnicos de Campo)
-
-- **Framework:** React Native + Expo (Expo Router para navegación orientada a archivos)
-- **Estilos:** NativeWind (Tailwind CSS para componentes nativos)
-- **Seguridad:** Almacenamiento local seguro con Expo SecureStore
-
 ---
 
 ## 📁 Estructura del Proyecto
@@ -66,9 +83,9 @@ El proyecto está estructurado como un monorepo para facilitar la gestión conju
 isp_platform/
 ├── backend/                  # Código fuente del backend (FastAPI)
 │   ├── app/
-│   │   ├── api/              # Routers FastAPI por módulo
-│   │   ├── models/           # Modelos de base de datos SQLAlchemy
-│   │   ├── schemas/          # Esquemas de validación Pydantic
+│   │   ├── api/              # Routers FastAPI por módulo (auth, company, custom_services, traffic_api...)
+│   │   ├── models/           # Modelos de base de datos SQLAlchemy (user, company, custom_service...)
+│   │   ├── schemas/          # Esquemas de validación Pydantic (user, company, custom_service...)
 │   │   ├── services/         # Lógica de negocio (MikroTik, SRI, etc.)
 │   │   ├── core/             # Configuración del sistema, auth y seguridad
 │   │   └── workers/          # Tareas asíncronas de Celery
@@ -77,8 +94,8 @@ isp_platform/
 │   └── requirements.txt      # Dependencias del backend
 ├── frontend/                 # Panel web de administración (React)
 │   ├── src/
-│   │   ├── components/       # Componentes visuales comunes
-│   │   ├── pages/            # Vistas por módulo de la plataforma
+│   │   ├── components/       # Componentes visuales comunes (AppLayout, RouterFormDialog...)
+│   │   ├── pages/            # Vistas por módulo (TrafficPage, CustomServicesPage, ProfilePage...)
 │   │   ├── stores/           # Almacenes de estado global (Zustand)
 │   │   └── services/         # Clientes de consumo de API REST/WebSockets
 ├── architecture/             # Recursos visuales y diagramas SVG

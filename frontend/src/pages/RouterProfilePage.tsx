@@ -16,7 +16,6 @@ import api from '@/services/api'
 import { RouterStatusBadge } from '@/components/RouterStatusBadge'
 import { RouterFormDialog } from '@/components/RouterFormDialog'
 import { useAuthStore } from '@/stores/authStore'
-import { useSettingsStore } from '@/stores/settingsStore'
 import { formatUptime } from '@/lib/utils'
 import TrafficChart, { formatSpeed } from '@/components/TrafficChart'
 
@@ -223,7 +222,6 @@ export function RouterProfilePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { user } = useAuthStore()
-  const { hideIps } = useSettingsStore()
   const isAdmin = user?.rol === 'admin'
 
   const [activeTab, setActiveTab] = useState<'stats' | 'clients' | 'queues' | 'settings' | 'pppoe'>('stats')
@@ -648,7 +646,7 @@ export function RouterProfilePage() {
               <div>
                 <span className="block text-xs text-muted-foreground">Dirección IP / Host</span>
                 <code className="text-sm font-mono text-foreground font-semibold">
-                  {hideIps ? '••••••••' : router.ip}:{router.puerto_api}
+                  {router.ip}:{router.puerto_api}
                 </code>
               </div>
 

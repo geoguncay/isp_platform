@@ -5,12 +5,11 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Wifi, LayoutDashboard, Router, Users, Bell,
-  LogOut, Menu, X, ChevronDown, ChevronRight, Activity, Settings, Eye, EyeOff, Network,
-  Zap, Shield, Building, Sliders,
+  Wifi, LayoutDashboard, Router, Users,
+  LogOut, Menu, X, ChevronDown, ChevronRight, Activity, Settings, Network,
+  Zap, Building, Sliders, BarChart2,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
-import { useSettingsStore } from '@/stores/settingsStore'
 import api from '@/services/api'
 
 interface NavLinkItem {
@@ -31,7 +30,7 @@ type NavItem = (NavLinkItem & { roles?: string[] }) | NavGroupItem
 const navItems: NavItem[] = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   {
-    label: 'Gestión de Red',
+    label: 'Dispositivos',
     icon: Network,
     roles: ['admin', 'tecnico'],
     items: [
@@ -39,7 +38,15 @@ const navItems: NavItem[] = [
       { to: '/traffic', icon: Activity, label: 'Tráfico' },
     ]
   },
-  { to: '/clients', icon: Users, label: 'Clientes', roles: ['admin', 'tecnico'] },
+  {
+    label: 'Suscriptores',
+    icon: Users,
+    roles: ['admin', 'tecnico'],
+    items: [
+      { to: '/clients', icon: Users, label: 'Clientes' },
+      { to: '/subscribers/stats', icon: BarChart2, label: 'Estadísticas' },
+    ]
+  },
   {
     label: 'Servicios',
     icon: Zap,
@@ -49,8 +56,6 @@ const navItems: NavItem[] = [
       { to: '/custom-services', icon: Sliders, label: 'Personalizado' },
     ]
   },
-  { to: '/users', icon: Shield, label: 'Usuarios', roles: ['admin'] },
-  { to: '/alerts', icon: Bell, label: 'Alertas' },
 ]
 
 export const getLogoUrl = (url: string | null | undefined): string => {
@@ -64,12 +69,14 @@ export const getLogoUrl = (url: string | null | undefined): string => {
 
 export function AppLayout() {
   const { user, logout } = useAuthStore()
-  const { hideIps, toggleHideIps } = useSettingsStore()
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [networkMenuOpen, setNetworkMenuOpen] = useState(
     location.pathname.startsWith('/routers') || location.pathname.startsWith('/traffic')
+  )
+  const [subscribersMenuOpen, setSubscribersMenuOpen] = useState(
+    location.pathname.startsWith('/clients') || location.pathname.startsWith('/subscribers')
   )
   const [servicesMenuOpen, setServicesMenuOpen] = useState(
     location.pathname.startsWith('/plans') || location.pathname.startsWith('/custom-services')
@@ -78,6 +85,9 @@ export function AppLayout() {
   useEffect(() => {
     if (location.pathname.startsWith('/routers') || location.pathname.startsWith('/traffic')) {
       setNetworkMenuOpen(true)
+    }
+    if (location.pathname.startsWith('/clients') || location.pathname.startsWith('/subscribers')) {
+      setSubscribersMenuOpen(true)
     }
     if (location.pathname.startsWith('/plans') || location.pathname.startsWith('/custom-services')) {
       setServicesMenuOpen(true)
@@ -184,10 +194,17 @@ export function AppLayout() {
         {visibleNavItems.map((item) => {
           if ('items' in item) {
             const hasActiveChild = item.items.some(sub => location.pathname.startsWith(sub.to))
-            const isMenuOpen = item.label === 'Gestión de Red' ? networkMenuOpen : servicesMenuOpen
+            const isMenuOpen =
+              item.label === 'Dispositivos'
+                ? networkMenuOpen
+                : item.label === 'Suscriptores'
+                ? subscribersMenuOpen
+                : servicesMenuOpen
             const toggleMenu = () => {
-              if (item.label === 'Gestión de Red') {
+              if (item.label === 'Dispositivos') {
                 setNetworkMenuOpen(!networkMenuOpen)
+              } else if (item.label === 'Suscriptores') {
+                setSubscribersMenuOpen(!subscribersMenuOpen)
               } else {
                 setServicesMenuOpen(!servicesMenuOpen)
               }
@@ -259,14 +276,6 @@ export function AppLayout() {
             <p className="text-sm font-medium text-foreground truncate">{user?.nombre}</p>
             <p className="text-xs text-muted-foreground capitalize">{user?.rol}</p>
           </div>
-          <button
-            id="toggle-ips-btn"
-            onClick={toggleHideIps}
-            title={hideIps ? 'Mostrar IPs' : 'Ocultar IPs'}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors mr-1"
-          >
-            {hideIps ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
           <NavLink
             id="profile-btn"
             to="/profile"

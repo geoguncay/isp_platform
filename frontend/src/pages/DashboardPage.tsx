@@ -6,7 +6,6 @@ import { Server, Wifi, Users, Bell, Activity, UserCheck, UserX, UserMinus } from
 import api from '@/services/api'
 import { RouterStatusBadge } from '@/components/RouterStatusBadge'
 import { useAuthStore } from '@/stores/authStore'
-import { useSettingsStore } from '@/stores/settingsStore'
 
 interface ClientStats {
   total: number
@@ -17,7 +16,6 @@ interface ClientStats {
 
 export function DashboardPage() {
   const { user } = useAuthStore()
-  const { hideIps } = useSettingsStore()
 
   const { data: routers = [] } = useQuery({
     queryKey: ['routers'],
@@ -187,7 +185,7 @@ export function DashboardPage() {
                     <div>
                       <p className="text-sm font-medium text-foreground">{router.nombre}</p>
                       <p className="text-xs text-muted-foreground font-mono">
-                        {hideIps ? '••••••••' : router.ip}
+                        {router.ip}
                       </p>
                     </div>
                   </div>

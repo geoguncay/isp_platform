@@ -8,7 +8,6 @@ import api from '@/services/api'
 import { RouterStatusBadge } from '@/components/RouterStatusBadge'
 import { RouterFormDialog } from '@/components/RouterFormDialog'
 import { useAuthStore } from '@/stores/authStore'
-import { useSettingsStore } from '@/stores/settingsStore'
 import { useNavigate } from 'react-router-dom'
 import { formatUptime } from '@/lib/utils'
 
@@ -41,7 +40,6 @@ async function deleteRouter(id: string): Promise<void> {
 
 export function RoutersPage() {
   const { user } = useAuthStore()
-  const { hideIps } = useSettingsStore()
   const queryClient = useQueryClient()
   const isAdmin = user?.rol === 'admin'
   const navigate = useNavigate()
@@ -218,7 +216,7 @@ export function RoutersPage() {
                   </td>
                   <td className="hidden md:table-cell">
                     <code className="text-xs bg-secondary/50 px-2 py-1 rounded text-muted-foreground font-mono">
-                      {hideIps ? '••••••••' : router.ip}:{router.puerto_api}
+                      {router.ip}:{router.puerto_api}
                     </code>
                   </td>
                   <td>

@@ -13,7 +13,6 @@ import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import api from '@/services/api'
-import { useSettingsStore } from '@/stores/settingsStore'
 import { ClientFormDialog } from '@/components/ClientFormDialog'
 import TrafficChart from '@/components/TrafficChart'
 
@@ -44,7 +43,6 @@ export function ClientProfilePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { hideIps } = useSettingsStore()
 
   const [activeTab, setActiveTab] = useState<'plans' | 'suspensions' | 'payments' | 'tickets' | 'traffic' | 'documents'>('traffic')
   const [isUploading, setIsUploading] = useState(false)
@@ -429,7 +427,7 @@ export function ClientProfilePage() {
                   <Shield className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
                   <div>
                     <p className="text-xs text-muted-foreground">Cédula</p>
-                    <p className="text-sm font-semibold text-foreground font-mono">{hideIps ? '••••••••' : client.cedula}</p>
+                    <p className="text-sm font-semibold text-foreground font-mono">{client.cedula}</p>
                   </div>
                 </div>
 
@@ -543,7 +541,7 @@ export function ClientProfilePage() {
                       <div>
                         <p className="text-xs text-muted-foreground">Contraseña PPPoE</p>
                         <p className="text-sm font-semibold text-foreground font-mono">
-                          {hideIps ? '••••••••' : (client.pppoe_secret?.contraseña_ppp ?? 'No configurada')}
+                          {client.pppoe_secret?.contraseña_ppp ?? 'No configurada'}
                         </p>
                       </div>
                     </div>

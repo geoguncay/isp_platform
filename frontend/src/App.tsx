@@ -18,6 +18,7 @@ import { PlansPage } from '@/pages/PlansPage'
 import { RouterProfilePage } from '@/pages/RouterProfilePage'
 import { TrafficPage } from '@/pages/TrafficPage'
 import { CustomServicesPage } from '@/pages/CustomServicesPage'
+import { SubscribersStatsPage } from '@/pages/SubscribersStatsPage'
 
 
 
@@ -54,20 +55,11 @@ function AppContent() {
           <Route path="/traffic" element={<TrafficPage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/clients/:id" element={<ClientProfilePage />} />
+          <Route path="/subscribers/stats" element={<SubscribersStatsPage />} />
           <Route path="/plans" element={<PlansPage />} />
           <Route path="/custom-services" element={<CustomServicesPage />} />
           <Route path="/profile" element={<ProfilePage />} />
-          {/* Páginas de fases futuras — placeholder */}
-          <Route path="/users" element={
-            <div className="flex items-center justify-center h-64 text-muted-foreground">
-              Gestión de usuarios — próximamente
-            </div>
-          } />
-          <Route path="/alerts" element={
-            <div className="flex items-center justify-center h-64 text-muted-foreground">
-              Panel de alertas — próximamente (Fase 3)
-            </div>
-          } />
+
         </Route>
       </Route>
 

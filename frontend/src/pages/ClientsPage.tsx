@@ -12,7 +12,6 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import api from '@/services/api'
-import { useSettingsStore } from '@/stores/settingsStore'
 import { ClientFormDialog } from '@/components/ClientFormDialog'
 
 interface Client {
@@ -62,7 +61,6 @@ const DEFAULT_CENTER: [number, number] = [-0.180653, -78.467834]
 export function ClientsPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { hideIps } = useSettingsStore()
 
   // State de filtros y paginación
   const [search, setSearch] = useState('')
@@ -481,7 +479,7 @@ export function ClientsPage() {
                           </div>
                         </td>
                         <td className="hidden md:table-cell font-mono text-xs text-muted-foreground">
-                          {hideIps ? '••••••••' : client.cedula}
+                          {client.cedula}
                         </td>
                         <td>
                           <span className="text-xs text-muted-foreground font-medium">
@@ -493,7 +491,7 @@ export function ClientsPage() {
                         </td>
                         <td className="font-mono text-xs text-foreground font-semibold">
                           {client.static_ip?.ip ? (
-                            hideIps ? '••••••••' : client.static_ip.ip
+                            client.static_ip.ip
                           ) : (
                             <span className="text-muted-foreground font-normal italic">—</span>
                           )}

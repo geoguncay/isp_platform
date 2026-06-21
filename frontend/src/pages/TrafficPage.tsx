@@ -11,7 +11,6 @@ import {
 import api from '@/services/api'
 import TrafficChart, { formatSpeed } from '@/components/TrafficChart'
 import { RouterStatusBadge } from '@/components/RouterStatusBadge'
-import { useSettingsStore } from '@/stores/settingsStore'
 
 interface Router {
   id: string
@@ -61,7 +60,6 @@ const calculateAverageUploadSpeed = (samples: any[]) => {
 
 export function TrafficPage() {
   const navigate = useNavigate()
-  const { hideIps } = useSettingsStore()
 
   // ── Router Selector States ──
   const [selectedRouterId, setSelectedRouterId] = useState<string>('')
