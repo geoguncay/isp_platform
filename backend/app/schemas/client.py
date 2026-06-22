@@ -22,6 +22,13 @@ class ClientBase(BaseModel):
     router_id: uuid.UUID
     tipo: str = Field(default="static")  # "static" o "pppoe"
     email: str | None = Field(default=None, max_length=100)
+    inicio_facturacion: datetime | None = None
+    dia_inicio_periodo: int = Field(default=1, ge=1, le=31)
+    crear_factura_anticipo_dias: int = Field(default=0, ge=0)
+    tipo_facturacion: str = Field(default="forward")
+    auto_aplicar_pago: bool = Field(default=True)
+    usar_credito_auto: bool = Field(default=True)
+    prorrateo_separado: bool = Field(default=True)
     created_at: datetime | None = None
 
     @field_validator("tipo")
@@ -62,6 +69,13 @@ class ClientUpdate(BaseModel):
     tipo: str | None = None
     activo: bool | None = None
     email: str | None = Field(default=None, max_length=100)
+    inicio_facturacion: datetime | None = None
+    dia_inicio_periodo: int | None = Field(default=None, ge=1, le=31)
+    crear_factura_anticipo_dias: int | None = Field(default=None, ge=0)
+    tipo_facturacion: str | None = None
+    auto_aplicar_pago: bool | None = None
+    usar_credito_auto: bool | None = None
+    prorrateo_separado: bool | None = None
     ip: str | None = Field(default=None, min_length=7, max_length=45)
     mac: str | None = Field(default=None, min_length=17, max_length=17)
     notas_ip: str | None = None

@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useForm, Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { X, Loader2, MapPin, User, CreditCard, Bell, Wifi, Check } from 'lucide-react'
+import { X, Loader2, MapPin, User, CreditCard, Bell, Wifi, Check, Layers } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -31,12 +31,19 @@ interface FormRouter {
   id: string
   nombre: string
   ip?: string
+  latitud?: number | null
+  longitud?: number | null
+  site_nombre?: string | null
 }
 
 interface FormPlan {
   id: string
   nombre: string
   precio: number
+  velocidad_down_mbps?: number
+  velocidad_up_mbps?: number
+  descripcion?: string
+  impuestos?: number
 }
 
 interface FormCustomService {
@@ -73,6 +80,13 @@ const clientSchema = z.object({
   perfil_id: z.string().optional().nullable(),
   email: z.string().email('Ingrese un correo válido').optional().or(z.literal('')),
   created_at: z.string().optional().nullable(),
+  inicio_facturacion: z.string().optional().nullable(),
+  dia_inicio_periodo: z.coerce.number().min(1).max(31).optional().nullable(),
+  crear_factura_anticipo_dias: z.coerce.number().min(0).optional().nullable(),
+  tipo_facturacion: z.string().optional().nullable(),
+  auto_aplicar_pago: z.boolean().optional(),
+  usar_credito_auto: z.boolean().optional(),
+  prorrateo_separado: z.boolean().optional(),
   // Campos ficticios para Paso 2 (Facturación y Notificaciones)
   dia_pago: z.string().optional().nullable(),
   metodo_pago: z.string().optional().nullable(),
@@ -173,6 +187,13 @@ interface FormClient {
   latitud?: number | null
   longitud?: number | null
   created_at?: string | null
+  inicio_facturacion?: string | null
+  dia_inicio_periodo?: number | null
+  crear_factura_anticipo_dias?: number | null
+  tipo_facturacion?: string | null
+  auto_aplicar_pago?: boolean | null
+  usar_credito_auto?: boolean | null
+  prorrateo_separado?: boolean | null
   plan_activo?: { id: string; nombre: string; precio: number } | null
   static_ip?: {
     ip: string
@@ -197,7 +218,7 @@ interface ClientFormDialogProps {
 export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFormDialogProps) {
   const isEdit = !!client
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
 
   const {
     register,
@@ -268,6 +289,248 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
   const nextInvoiceTotal = Number(activePlanPrice) + recurringCustomServicesPrice + oneTimeCustomServicesPrice
   const futureMonthlyTotal = Number(activePlanPrice) + recurringCustomServicesPrice
 
+  const watchInicioFacturacion = watch('inicio_facturacion')
+  const watchDiaInicioPeriodo = watch('dia_inicio_periodo')
+  const watchTipoFacturacion = watch('tipo_facturacion')
+  const watchCrearFacturaAnticipoDias = watch('crear_factura_anticipo_dias')
+  const watchProrrateoSeparado = watch('prorrateo_separado')
+
+  const getSimulation = () => {
+    const inicioStr = watchInicioFacturacion || new Date().toISOString().split('T')[0]
+    const diaInicio = Number(watchDiaInicioPeriodo) || 1
+    const tipoFacturacion = watchTipoFacturacion || 'forward'
+    const anticipoDias = Number(watchCrearFacturaAnticipoDias) || 0
+    const prorrateoSeparado = !!watchProrrateoSeparado
+
+    const planPrice = Number(activePlanPrice) || 0
+    const planName = selectedPlanId
+      ? plans.find((p) => p.id === selectedPlanId)?.nombre || 'Plan Contratado'
+      : client?.plan_activo?.nombre || 'Plan Contratado'
+
+    const formatDate = (date: Date) => {
+      const day = String(date.getDate()).padStart(2, '0')
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const year = date.getFullYear()
+      return `${day}/${month}/${year}`
+    }
+
+    const addDays = (date: Date, days: number) => {
+      const d = new Date(date.getTime())
+      d.setDate(d.getDate() + days)
+      return d
+    }
+
+    const parts = inicioStr.split('-')
+    const startY = Number(parts[0])
+    const startM = Number(parts[1]) - 1
+    const startD = Number(parts[2])
+
+    const D_start = new Date(startY, startM, startD)
+
+    let periodStart = new Date(startY, startM, Math.min(diaInicio, new Date(startY, startM + 1, 0).getDate()))
+    if (D_start < periodStart) {
+      const prevM = startM - 1
+      const prevY = prevM < 0 ? startY - 1 : startY
+      const prevMNormalized = prevM < 0 ? 11 : prevM
+      periodStart = new Date(prevY, prevMNormalized, Math.min(diaInicio, new Date(prevY, prevMNormalized + 1, 0).getDate()))
+    }
+
+    const nextM = periodStart.getMonth() + 1
+    const nextY = periodStart.getFullYear() + (nextM > 11 ? 1 : 0)
+    const nextMNormalized = nextM > 11 ? 0 : nextM
+    const periodNextStart = new Date(nextY, nextMNormalized, Math.min(diaInicio, new Date(nextY, nextMNormalized + 1, 0).getDate()))
+
+    const periodEnd = new Date(periodNextStart.getTime() - 24 * 60 * 60 * 1000)
+
+    const normalDays = Math.round((periodEnd.getTime() - periodStart.getTime()) / (24 * 60 * 60 * 1000)) + 1
+    const proratedDays = Math.round((periodEnd.getTime() - D_start.getTime()) / (24 * 60 * 60 * 1000)) + 1
+
+    const ratio = Math.max(0, Math.min(1, proratedDays / normalDays))
+    const proratedPlanPrice = planPrice * ratio
+    const proratedRecurringServicesPrice = recurringCustomServicesPrice * ratio
+
+    let firstInvoice: {
+      periodoDesde: string
+      periodoHasta: string
+      nombrePlan: string
+      monto: number
+      fechaCreacion: string
+      fechaVencimiento: string
+    }
+
+    let nextInvoice: {
+      periodoDesde: string
+      periodoHasta: string
+      nombrePlan: string
+      monto: number
+      fechaCreacion: string
+      fechaVencimiento: string
+    }
+
+    const isProrated = D_start.getTime() > periodStart.getTime() && ratio < 1.0
+
+    if (isProrated) {
+      if (prorrateoSeparado) {
+        const firstMonto = proratedPlanPrice + proratedRecurringServicesPrice + oneTimeCustomServicesPrice
+        
+        let creationDate: Date
+        if (tipoFacturacion === 'forward') {
+          creationDate = D_start
+        } else {
+          creationDate = periodNextStart
+        }
+        const finalCreationDate = addDays(creationDate, -anticipoDias)
+        const dueDate = addDays(finalCreationDate, 10)
+
+        firstInvoice = {
+          periodoDesde: formatDate(D_start),
+          periodoHasta: formatDate(periodEnd),
+          nombrePlan: planName,
+          monto: Number(firstMonto.toFixed(2)),
+          fechaCreacion: formatDate(finalCreationDate),
+          fechaVencimiento: formatDate(dueDate),
+        }
+
+        const nextMonto = planPrice + recurringCustomServicesPrice
+        
+        let nextCreationDate: Date
+        if (tipoFacturacion === 'forward') {
+          nextCreationDate = periodNextStart
+        } else {
+          const nextNextM = periodNextStart.getMonth() + 1
+          const nextNextY = periodNextStart.getFullYear() + (nextNextM > 11 ? 1 : 0)
+          const nextNextMNormalized = nextNextM > 11 ? 0 : nextNextM
+          nextCreationDate = new Date(nextNextY, nextNextMNormalized, Math.min(diaInicio, new Date(nextNextY, nextNextMNormalized + 1, 0).getDate()))
+        }
+        const finalNextCreationDate = addDays(nextCreationDate, -anticipoDias)
+        const nextDueDate = addDays(finalNextCreationDate, 10)
+
+        const nextNextM = periodNextStart.getMonth() + 1
+        const nextNextY = periodNextStart.getFullYear() + (nextNextM > 11 ? 1 : 0)
+        const nextNextMNormalized = nextNextM > 11 ? 0 : nextNextM
+        const periodNextNextStart = new Date(nextNextY, nextNextMNormalized, Math.min(diaInicio, new Date(nextNextY, nextNextMNormalized + 1, 0).getDate()))
+        const nextPeriodEnd = new Date(periodNextNextStart.getTime() - 24 * 60 * 60 * 1000)
+
+        nextInvoice = {
+          periodoDesde: formatDate(periodNextStart),
+          periodoHasta: formatDate(nextPeriodEnd),
+          nombrePlan: planName,
+          monto: Number(nextMonto.toFixed(2)),
+          fechaCreacion: formatDate(finalNextCreationDate),
+          fechaVencimiento: formatDate(nextDueDate),
+        }
+      } else {
+        const nextNextM = periodNextStart.getMonth() + 1
+        const nextNextY = periodNextStart.getFullYear() + (nextNextM > 11 ? 1 : 0)
+        const nextNextMNormalized = nextNextM > 11 ? 0 : nextNextM
+        const periodNextNextStart = new Date(nextNextY, nextNextMNormalized, Math.min(diaInicio, new Date(nextNextY, nextNextMNormalized + 1, 0).getDate()))
+        const nextPeriodEnd = new Date(periodNextNextStart.getTime() - 24 * 60 * 60 * 1000)
+
+        const firstMonto = proratedPlanPrice + proratedRecurringServicesPrice + planPrice + recurringCustomServicesPrice + oneTimeCustomServicesPrice
+
+        let creationDate: Date
+        if (tipoFacturacion === 'forward') {
+          creationDate = D_start
+        } else {
+          creationDate = periodNextNextStart
+        }
+        const finalCreationDate = addDays(creationDate, -anticipoDias)
+        const dueDate = addDays(finalCreationDate, 10)
+
+        firstInvoice = {
+          periodoDesde: formatDate(D_start),
+          periodoHasta: formatDate(nextPeriodEnd),
+          nombrePlan: planName,
+          monto: Number(firstMonto.toFixed(2)),
+          fechaCreacion: formatDate(finalCreationDate),
+          fechaVencimiento: formatDate(dueDate),
+        }
+
+        const nextMonto = planPrice + recurringCustomServicesPrice
+        
+        let nextCreationDate: Date
+        if (tipoFacturacion === 'forward') {
+          nextCreationDate = periodNextNextStart
+        } else {
+          const n3M = periodNextNextStart.getMonth() + 1
+          const n3Y = periodNextNextStart.getFullYear() + (n3M > 11 ? 1 : 0)
+          const n3MNormalized = n3M > 11 ? 0 : n3M
+          nextCreationDate = new Date(n3Y, n3MNormalized, Math.min(diaInicio, new Date(n3Y, n3MNormalized + 1, 0).getDate()))
+        }
+        const finalNextCreationDate = addDays(nextCreationDate, -anticipoDias)
+        const nextDueDate = addDays(finalNextCreationDate, 10)
+
+        const n3M = periodNextNextStart.getMonth() + 1
+        const n3Y = periodNextNextStart.getFullYear() + (n3M > 11 ? 1 : 0)
+        const n3MNormalized = n3M > 11 ? 0 : n3M
+        const periodN3Start = new Date(n3Y, n3MNormalized, Math.min(diaInicio, new Date(n3Y, n3MNormalized + 1, 0).getDate()))
+        const nextNextPeriodEnd = new Date(periodN3Start.getTime() - 24 * 60 * 60 * 1000)
+
+        nextInvoice = {
+          periodoDesde: formatDate(periodNextNextStart),
+          periodoHasta: formatDate(nextNextPeriodEnd),
+          nombrePlan: planName,
+          monto: Number(nextMonto.toFixed(2)),
+          fechaCreacion: formatDate(finalNextCreationDate),
+          fechaVencimiento: formatDate(nextDueDate),
+        }
+      }
+    } else {
+      const firstMonto = planPrice + recurringCustomServicesPrice + oneTimeCustomServicesPrice
+      
+      let creationDate: Date
+      if (tipoFacturacion === 'forward') {
+        creationDate = D_start
+      } else {
+        creationDate = periodNextStart
+      }
+      const finalCreationDate = addDays(creationDate, -anticipoDias)
+      const dueDate = addDays(finalCreationDate, 10)
+
+      firstInvoice = {
+        periodoDesde: formatDate(D_start),
+        periodoHasta: formatDate(periodEnd),
+        nombrePlan: planName,
+        monto: Number(firstMonto.toFixed(2)),
+        fechaCreacion: formatDate(finalCreationDate),
+        fechaVencimiento: formatDate(dueDate),
+      }
+
+      const nextMonto = planPrice + recurringCustomServicesPrice
+      let nextCreationDate: Date
+      if (tipoFacturacion === 'forward') {
+        nextCreationDate = periodNextStart
+      } else {
+        const nextNextM = periodNextStart.getMonth() + 1
+        const nextNextY = periodNextStart.getFullYear() + (nextNextM > 11 ? 1 : 0)
+        const nextNextMNormalized = nextNextM > 11 ? 0 : nextNextM
+        nextCreationDate = new Date(nextNextY, nextNextMNormalized, Math.min(diaInicio, new Date(nextNextY, nextNextMNormalized + 1, 0).getDate()))
+      }
+      const finalNextCreationDate = addDays(nextCreationDate, -anticipoDias)
+      const nextDueDate = addDays(finalNextCreationDate, 10)
+
+      const nextNextM = periodNextStart.getMonth() + 1
+      const nextNextY = periodNextStart.getFullYear() + (nextNextM > 11 ? 1 : 0)
+      const nextNextMNormalized = nextNextM > 11 ? 0 : nextNextM
+      const periodNextNextStart = new Date(nextNextY, nextNextMNormalized, Math.min(diaInicio, new Date(nextNextY, nextNextMNormalized + 1, 0).getDate()))
+      const nextPeriodEnd = new Date(periodNextNextStart.getTime() - 24 * 60 * 60 * 1000)
+
+      nextInvoice = {
+        periodoDesde: formatDate(periodNextStart),
+        periodoHasta: formatDate(nextPeriodEnd),
+        nombrePlan: planName,
+        monto: Number(nextMonto.toFixed(2)),
+        fechaCreacion: formatDate(finalNextCreationDate),
+        fechaVencimiento: formatDate(nextDueDate),
+      }
+    }
+
+    return {
+      firstInvoice,
+      nextInvoice,
+    }
+  }
+
 
   const handleGetLocation = useCallback(() => {
     if (navigator.geolocation) {
@@ -288,6 +551,12 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
     if (open) {
       setStep(1)
       setErrorMessage(null)
+      const today = new Date()
+      const yyyy = today.getFullYear()
+      const mm = String(today.getMonth() + 1).padStart(2, '0')
+      const dd = String(today.getDate()).padStart(2, '0')
+      const todayStr = `${yyyy}-${mm}-${dd}`
+
       if (client) {
         reset({
           id: client.id,
@@ -309,7 +578,16 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           contraseña_ppp: client.pppoe_secret?.contraseña_ppp ?? '',
           perfil_id: client.pppoe_secret?.perfil_id ?? '',
           email: client.email ?? '',
-          created_at: client.created_at ? client.created_at.split('T')[0] : '',
+          created_at: client.created_at ? client.created_at.split('T')[0] : todayStr,
+          inicio_facturacion: client.inicio_facturacion 
+            ? client.inicio_facturacion.split('T')[0] 
+            : (client.created_at ? client.created_at.split('T')[0] : todayStr),
+          dia_inicio_periodo: client.dia_inicio_periodo ?? 1,
+          crear_factura_anticipo_dias: client.crear_factura_anticipo_dias ?? 0,
+          tipo_facturacion: client.tipo_facturacion ?? 'forward',
+          auto_aplicar_pago: client.auto_aplicar_pago ?? true,
+          usar_credito_auto: client.usar_credito_auto ?? true,
+          prorrateo_separado: client.prorrateo_separado ?? true,
           dia_pago: '5',
           metodo_pago: 'transferencia',
           notif_email: true,
@@ -318,11 +596,6 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           custom_service_ids: client.custom_services?.map((cs: any) => cs.id) ?? [],
         })
       } else {
-        const today = new Date()
-        const yyyy = today.getFullYear()
-        const mm = String(today.getMonth() + 1).padStart(2, '0')
-        const dd = String(today.getDate()).padStart(2, '0')
-        const todayStr = `${yyyy}-${mm}-${dd}`
         reset({
           id: undefined,
           nombre: '',
@@ -344,6 +617,13 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           perfil_id: '',
           email: '',
           created_at: todayStr,
+          inicio_facturacion: todayStr,
+          dia_inicio_periodo: 1,
+          crear_factura_anticipo_dias: 0,
+          tipo_facturacion: 'forward',
+          auto_aplicar_pago: true,
+          usar_credito_auto: true,
+          prorrateo_separado: true,
           dia_pago: '5',
           metodo_pago: 'transferencia',
           notif_email: true,
@@ -383,6 +663,13 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
         delete payload.created_at
       } else {
         payload.created_at = `${createdAtStr}T12:00:00`
+      }
+
+      const inicioFacturacionStr = payload.inicio_facturacion as string | null | undefined
+      if (!inicioFacturacionStr || inicioFacturacionStr.trim() === '') {
+        payload.inicio_facturacion = null
+      } else {
+        payload.inicio_facturacion = `${inicioFacturacionStr}T12:00:00`
       }
 
       if (payload.tipo === 'pppoe') {
@@ -438,13 +725,36 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
 
   const onFormError = (errors: Record<string, unknown>) => {
     const errorKeys = Object.keys(errors)
-    const step1Fields = ['nombre', 'tipo_documento', 'cedula', 'telefono', 'direccion', 'email', 'created_at']
-    const hasStep1Error = errorKeys.some((key) => step1Fields.includes(key))
-    if (hasStep1Error) {
+    
+    const step1Fields = ['nombre', 'tipo_documento', 'cedula', 'telefono', 'direccion', 'email', 'created_at', 'latitud', 'longitud']
+    if (errorKeys.some((key) => step1Fields.includes(key))) {
       setStep(1)
       return
     }
-    setStep(3)
+    
+    const step2Fields = ['dia_pago', 'metodo_pago', 'plan_id']
+    if (errorKeys.some((key) => step2Fields.includes(key))) {
+      setStep(2)
+      return
+    }
+    
+    const step3Fields = ['custom_service_ids']
+    if (errorKeys.some((key) => step3Fields.includes(key))) {
+      setStep(3)
+      return
+    }
+    
+    const step4Fields = ['router_id', 'tipo', 'ip', 'mac', 'notas_ip', 'usuario_ppp', 'contraseña_ppp', 'perfil_id']
+    if (errorKeys.some((key) => step4Fields.includes(key))) {
+      setStep(4)
+      return
+    }
+    
+    const step5Fields = ['notif_email', 'notif_sms', 'notif_whatsapp']
+    if (errorKeys.some((key) => step5Fields.includes(key))) {
+      setStep(5)
+      return
+    }
   }
 
   if (!open) return null
@@ -470,12 +780,12 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
 
         {/* Stepper */}
         <div className="px-6 py-4 bg-secondary/20 border-b border-border/50">
-          <div className="flex items-center w-full max-w-3xl mx-auto justify-between relative">
+          <div className="flex items-center w-full max-w-4xl mx-auto justify-between relative">
             {/* Línea de fondo */}
             <div className="absolute top-5 left-0 right-0 h-0.5 bg-border -translate-y-1/2 z-0" />
             <div 
               className="absolute top-5 left-0 h-0.5 bg-brand-500 transition-all duration-300 -translate-y-1/2 z-0" 
-              style={{ width: step === 1 ? '0%' : step === 2 ? '50%' : '100%' }}
+              style={{ width: step === 1 ? '0%' : step === 2 ? '25%' : step === 3 ? '50%' : step === 4 ? '75%' : '100%' }}
             />
 
             {/* Paso 1 */}
@@ -509,12 +819,12 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                   ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
                   : 'bg-secondary border-border text-muted-foreground'
               }`}>
-                {step > 2 ? <Check className="w-5 h-5" /> : <CreditCard className="w-5 h-5" />}
+                {step > 2 ? <Check className="w-5 h-5" /> : <Layers className="w-5 h-5" />}
               </div>
               <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
                 step === 2 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
               }`}>
-                2. Facturación y Avisos
+                2. Servicios
               </span>
             </button>
 
@@ -525,16 +835,56 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
               className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
             >
               <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
-                step === 3 
+                step >= 3 
                   ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
                   : 'bg-secondary border-border text-muted-foreground'
               }`}>
-                <Wifi className="w-5 h-5" />
+                {step > 3 ? <Check className="w-5 h-5" /> : <CreditCard className="w-5 h-5" />}
               </div>
               <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
                 step === 3 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
               }`}>
-                3. Servicios y Red
+                3. Facturación
+              </span>
+            </button>
+
+            {/* Paso 4 */}
+            <button
+              type="button"
+              onClick={() => setStep(4)}
+              className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
+            >
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
+                step >= 4 
+                  ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
+                  : 'bg-secondary border-border text-muted-foreground'
+              }`}>
+                {step > 4 ? <Check className="w-5 h-5" /> : <Wifi className="w-5 h-5" />}
+              </div>
+              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
+                step === 4 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
+              }`}>
+                4. Red
+              </span>
+            </button>
+
+            {/* Paso 5 */}
+            <button
+              type="button"
+              onClick={() => setStep(5)}
+              className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
+            >
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
+                step === 5 
+                  ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
+                  : 'bg-secondary border-border text-muted-foreground'
+              }`}>
+                <Bell className="w-5 h-5" />
+              </div>
+              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
+                step === 5 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
+              }`}>
+                5. Avisos
               </span>
             </button>
           </div>
@@ -681,19 +1031,45 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
 
               {/* Mapa interactivo a la derecha */}
               <div className="flex flex-col h-full min-h-[300px] lg:min-h-0">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                     <MapPin className="w-4 h-4 text-brand-400" />
-                    Marcar ubicación en el mapa
+                    Ubicación en el Mapa
                   </span>
-                  <button
-                    type="button"
-                    onClick={handleGetLocation}
-                    className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 font-semibold"
-                  >
-                    <MapPin className="w-3.5 h-3.5 animate-pulse" />
-                    Usar mi ubicación actual
-                  </button>
+                  
+                  <div className="flex flex-wrap gap-2 w-full sm:w-auto items-center justify-end">
+                    {/* Centrar por Router / Zona */}
+                    <select
+                      onChange={(e) => {
+                        const rId = e.target.value
+                        const routerObj = routers.find((r) => r.id === rId)
+                        if (routerObj && routerObj.latitud && routerObj.longitud) {
+                          setValue('latitud', Number(routerObj.latitud))
+                          setValue('longitud', Number(routerObj.longitud))
+                        }
+                      }}
+                      className="bg-secondary/40 border border-border/60 text-[11px] text-foreground rounded px-2 py-1 font-sans cursor-pointer focus:outline-none focus:border-brand-500 max-w-[180px]"
+                      defaultValue=""
+                    >
+                      <option value="" disabled>📍 Ir a Nodo / Router...</option>
+                      {routers
+                        .filter((r) => r.latitud && r.longitud)
+                        .map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.nombre} {r.site_nombre ? `(${r.site_nombre})` : ''}
+                          </option>
+                        ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={handleGetLocation}
+                      className="text-[11px] bg-brand-500/10 hover:bg-brand-500/20 text-brand-400 border border-brand-500/20 rounded px-2.5 py-1 transition-colors flex items-center gap-1 font-semibold"
+                    >
+                      <MapPin className="w-3.5 h-3.5 animate-pulse" />
+                      Mi ubicación
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex-1 rounded-lg border border-border overflow-hidden h-72 lg:h-[350px]">
@@ -718,169 +1094,93 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
             </div>
           )}
 
-          {/* PASO 2: FACTURACIÓN Y AVISOS */}
+          {/* PASO 2: SERVICIOS */}
           {step === 2 && (
-            <div className="space-y-6 max-w-3xl mx-auto py-4 animate-fade-in">
-              <div className="bg-brand-500/10 border border-brand-500/30 rounded-xl p-4 flex gap-3.5 items-start">
-                <div className="p-2 bg-brand-500/20 text-brand-400 rounded-lg shrink-0">
-                  <Bell className="w-5 h-5 animate-pulse" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-brand-300">Configuración de Avisos y Facturación</h4>
-                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                    Este módulo se encuentra en fase de diseño técnico. Las opciones seleccionadas a continuación 
-                    servirán como pre-configuración y se vincularán automáticamente cuando se active la pasarela 
-                    de facturación electrónica y notificaciones.
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {/* Panel Facturación */}
-                <div className="glass-card p-5 border border-border/60 space-y-4 bg-secondary/10">
-                  <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
-                    <CreditCard className="w-4 h-4" /> Preferencias de Facturación
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-1.5">Día de Pago Preferido</label>
-                    <select {...register('dia_pago')} className="input-field cursor-pointer font-sans">
-                      <option value="1">Día 1 de cada mes</option>
-                      <option value="5">Día 5 de cada mes (Recomendado)</option>
-                      <option value="10">Día 10 de cada mes</option>
-                      <option value="15">Día 15 de cada mes</option>
-                      <option value="28">Día 28 de cada mes</option>
-                    </select>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      Determina la fecha límite del corte de servicio y envío de cobros.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-1.5">Método de Pago Habitual</label>
-                    <select {...register('metodo_pago')} className="input-field cursor-pointer font-sans">
-                      <option value="transferencia">Transferencia Bancaria / Depósito</option>
-                      <option value="efectivo">Pago en Efectivo (Oficina)</option>
-                      <option value="debito_automatico">Débito Automático</option>
-                      <option value="tarjeta">Tarjeta de Crédito / Débito</option>
-                    </select>
-                  </div>
-
-                  {/* Toggle para factura digital */}
-                  <div className="flex items-center justify-between pt-2">
-                    <div>
-                      <span className="text-sm font-medium text-foreground block">Envío Automático de Invoices</span>
-                      <span className="text-xs text-muted-foreground">Enviar factura digital al correo</span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer select-none">
-                      <input type="checkbox" className="sr-only peer" defaultChecked />
-                      <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Panel Notificaciones */}
-                <div className="glass-card p-5 border border-border/60 space-y-4 bg-secondary/10">
-                  <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
-                    <Bell className="w-4 h-4" /> Canales de Notificación Activos
-                  </div>
-
-                  <p className="text-xs text-muted-foreground">
-                    Seleccione los medios por los cuales el cliente recibirá estados de cuenta, alertas de pago y avisos de mantenimiento.
-                  </p>
-
-                  <div className="space-y-3.5 pt-2">
-                    {/* Canal WhatsApp */}
-                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/30 border border-border/40">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 border border-emerald-500/20">
-                          <span className="font-semibold text-xs">WA</span>
-                        </div>
-                        <div>
-                          <span className="text-sm font-medium text-foreground block">WhatsApp</span>
-                          <span className="text-xs text-muted-foreground">Mensajes de cobro y recordatorios</span>
-                        </div>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer select-none">
-                        <input type="checkbox" {...register('notif_whatsapp')} className="sr-only peer" />
-                        <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                      </label>
-                    </div>
-
-                    {/* Canal Correo */}
-                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/30 border border-border/40">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20">
-                          <span className="font-semibold text-xs">@</span>
-                        </div>
-                        <div>
-                          <span className="text-sm font-medium text-foreground block">Correo Electrónico</span>
-                          <span className="text-xs text-muted-foreground">Reportes de red y facturas PDF</span>
-                        </div>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer select-none">
-                        <input type="checkbox" {...register('notif_email')} className="sr-only peer" />
-                        <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                      </label>
-                    </div>
-
-                    {/* Canal SMS */}
-                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/30 border border-border/40">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-400 border border-amber-500/20">
-                          <span className="font-semibold text-xs">SMS</span>
-                        </div>
-                        <div>
-                          <span className="text-sm font-medium text-foreground block">Mensajería SMS</span>
-                          <span className="text-xs text-muted-foreground">Alertas críticas de suspensión</span>
-                        </div>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer select-none">
-                        <input type="checkbox" {...register('notif_sms')} className="sr-only peer" />
-                        <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* PASO 3: SERVICIOS Y RED */}
-          {step === 3 && (
             <div className="space-y-5 max-w-3xl mx-auto py-4 animate-fade-in">
               <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
-                <Wifi className="w-4 h-4" /> Configuración de Red e Internet
+                <Layers className="w-4 h-4" /> Selección de Plan y Servicios Adicionales
               </div>
 
-              <div className="glass-card p-6 border border-border/60 space-y-4 bg-secondary/10">
-                {/* Plan Inicial (Solo visible en creación) */}
-                {!isEdit ? (
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-1.5">Plan de Internet inicial *</label>
-                    <select {...register('plan_id')} className="input-field cursor-pointer">
-                      <option value="">Seleccione un plan inicial</option>
-                      {plans.map((p) => (
-                        <option key={p.id} value={p.id}>{p.nombre} (${Number(p.precio).toFixed(2)})</option>
-                      ))}
-                    </select>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      El plan seleccionado se activará inmediatamente tras registrar el cliente.
-                    </p>
-                  </div>
-                ) : (
-                   <div className="bg-brand-500/10 border border-brand-500/20 rounded-lg p-3 text-xs text-brand-300">
-                    ℹ️ Para modificar el plan activo o aplicar promociones, dirígete al perfil del cliente una vez guardados los cambios.
-                  </div>
-                )}
-                {/* Servicios de Valor Agregado / Adicionales */}
-                <div className="border-t border-border/40 pt-4 mt-2 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {/* Selección de Plan */}
+                <div className="glass-card p-5 border border-border/60 bg-secondary/10 md:col-span-1 space-y-4">
+                  {!isEdit ? (
+                    <div>
+                      <label className="block text-sm font-semibold text-brand-400 uppercase tracking-wider mb-2">
+                        Plan de Internet inicial *
+                      </label>
+                      <select {...register('plan_id')} className="input-field cursor-pointer font-sans">
+                        <option value="">Seleccione un plan inicial</option>
+                        {plans.map((p) => (
+                          <option key={p.id} value={p.id}>{p.nombre} (${Number(p.precio).toFixed(2)})</option>
+                        ))}
+                      </select>
+                      {errors.plan_id && <p className="text-xs text-destructive mt-1">{errors.plan_id.message}</p>}
+                      
+                      {/* Detalle básico del plan seleccionado */}
+                      {(() => {
+                        const selectedPlanObj = plans.find((p) => p.id === selectedPlanId)
+                        if (!selectedPlanObj) return null
+                        return (
+                          <div className="bg-brand-500/5 border border-brand-500/20 rounded-xl p-3.5 space-y-1.5 mt-3 animate-fade-in">
+                            <div className="text-[10px] font-bold text-brand-300 uppercase tracking-wider">
+                              Detalle del Plan
+                            </div>
+                            <div className="text-xs font-bold text-foreground">
+                              {selectedPlanObj.nombre}
+                            </div>
+                            <div className="text-xs font-mono font-bold text-brand-400">
+                              ${Number(selectedPlanObj.precio).toFixed(2)}/mes
+                            </div>
+                            {(selectedPlanObj.velocidad_down_mbps !== undefined || selectedPlanObj.velocidad_up_mbps !== undefined) && (
+                              <div className="text-[10px] text-muted-foreground flex gap-3 font-medium">
+                                <span>📥 Down: {selectedPlanObj.velocidad_down_mbps || 0} Mbps</span>
+                                <span>📤 Up: {selectedPlanObj.velocidad_up_mbps || 0} Mbps</span>
+                              </div>
+                            )}
+                            {selectedPlanObj.descripcion && (
+                              <div className="text-[10px] text-muted-foreground italic pt-1 border-t border-border/20">
+                                {selectedPlanObj.descripcion}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <label className="block text-sm font-semibold text-brand-400 uppercase tracking-wider">
+                        Plan Contratado Actual
+                      </label>
+                      {client?.plan_activo ? (
+                        <div className="bg-brand-500/5 border border-brand-500/20 rounded-xl p-3.5 space-y-1">
+                          <div className="text-xs font-bold text-foreground">
+                            {client.plan_activo.nombre}
+                          </div>
+                          <div className="text-xs font-mono font-bold text-brand-400">
+                            ${Number(client.plan_activo.precio).toFixed(2)}/mes
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-muted-foreground italic bg-secondary/20 p-3 rounded-xl border border-border/40 text-center">
+                          Sin plan activo asignado
+                        </div>
+                      )}
+                      <div className="bg-brand-500/10 border border-brand-500/20 rounded-lg p-3 text-[11px] text-brand-300 leading-relaxed">
+                        ℹ️ Para modificar el plan activo o aplicar promociones, dirígete al perfil del cliente una vez guardados los cambios.
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Servicios de Valor Agregado */}
+                <div className="glass-card p-5 border border-border/60 bg-secondary/10 md:col-span-2 space-y-4">
                   <div>
                     <label className="block text-sm font-semibold text-brand-400 uppercase tracking-wider mb-1">
                       Servicios Adicionales (Valores Agregados)
                     </label>
                     <p className="text-xs text-muted-foreground leading-relaxed font-medium">
-                      Selecciona los servicios adicionales personalizados para este cliente. Estos se sumarán al cobro de su plan mensual.
+                      Selecciona los servicios adicionales personalizados. Estos se sumarán al cobro de su plan mensual.
                     </p>
                   </div>
 
@@ -889,7 +1189,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                       No hay servicios adicionales activos configurados en el catálogo.
                     </p>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div className="grid grid-cols-1 gap-3 pt-1">
                       {customServices.map((cs) => {
                         const isSelected = selectedCustomServiceIds.includes(cs.id)
                         return (
@@ -937,55 +1237,194 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                       })}
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+          )}
 
-                  {/* Tarjeta de Resumen / Factura Estimada */}
-                  <div className="bg-brand-500/10 border border-brand-500/20 rounded-xl p-4 flex flex-col gap-3 mt-3">
-                    <div className="flex justify-between items-center pb-2 border-b border-brand-500/10">
-                      <div>
-                        <h4 className="text-xs font-bold text-brand-300 uppercase tracking-wider">Simulación de Facturación</h4>
-                        <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">
-                          Desglose estimado de cobros para el cliente.
-                        </p>
-                      </div>
+          {/* PASO 3: FACTURACIÓN */}
+          {step === 3 && (
+            <div className="space-y-5 max-w-3xl mx-auto py-4 animate-fade-in">
+              <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
+                <CreditCard className="w-4 h-4" /> Preferencias y Simulación de Facturación
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* Panel Preferencias */}
+                <div className="glass-card p-5 border border-border/60 space-y-4 bg-secondary/10">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">Día de Pago Preferido</label>
+                    <select {...register('dia_pago')} className="input-field cursor-pointer font-sans">
+                      <option value="1">Día 1 de cada mes</option>
+                      <option value="5">Día 5 de cada mes (Recomendado)</option>
+                      <option value="10">Día 10 de cada mes</option>
+                      <option value="15">Día 15 de cada mes</option>
+                      <option value="28">Día 28 de cada mes</option>
+                    </select>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Determina la fecha límite del corte de servicio y envío de cobros.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">Método de Pago Habitual</label>
+                    <select {...register('metodo_pago')} className="input-field cursor-pointer font-sans">
+                      <option value="transferencia">Transferencia Bancaria / Depósito</option>
+                      <option value="efectivo">Pago en Efectivo (Oficina)</option>
+                      <option value="debito_automatico">Débito Automático</option>
+                      <option value="tarjeta">Tarjeta de Crédito / Débito</option>
+                    </select>
+                  </div>
+
+                  {/* Fecha de Inicio Facturación */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Inicio Facturación</label>
+                      <input type="date" {...register('inicio_facturacion')} className="input-field font-sans text-xs cursor-pointer" />
                     </div>
-                    
-                    <div className="grid grid-cols-2 gap-y-1.5 text-xs font-medium text-muted-foreground">
-                      <span>Plan Base:</span>
-                      <span className="text-right text-foreground font-mono">${Number(activePlanPrice).toFixed(2)}/mes</span>
+                    <div>
+                      <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Día Inicio Período</label>
+                      <input type="number" min="1" max="31" {...register('dia_inicio_periodo')} className="input-field font-mono text-xs font-bold" />
+                    </div>
+                  </div>
 
-                      {recurringCustomServicesPrice > 0 && (
-                        <>
-                          <span>Adicionales Recurrentes:</span>
-                          <span className="text-right text-foreground font-mono">${recurringCustomServicesPrice.toFixed(2)}/mes</span>
-                        </>
-                      )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Tipo de Facturación</label>
+                      <select {...register('tipo_facturacion')} className="input-field font-sans text-xs cursor-pointer">
+                        <option value="forward">Adelantado (Forward)</option>
+                        <option value="backward">Vencido (Backward)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Anticipación (Días)</label>
+                      <input type="number" min="0" {...register('crear_factura_anticipo_dias')} className="input-field font-mono text-xs font-bold" />
+                    </div>
+                  </div>
 
-                      {oneTimeCustomServicesPrice > 0 && (
-                        <>
-                          <span className="text-purple-400 font-semibold">Cargos Únicos (Siguiente Factura):</span>
-                          <span className="text-right text-purple-400 font-semibold font-mono">${oneTimeCustomServicesPrice.toFixed(2)}</span>
-                        </>
-                      )}
+                  <div className="border-t border-border/40 pt-3 space-y-3">
+                    {/* Auto aplicar pago */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-semibold text-foreground block">Asociar Pago Automático</span>
+                        <span className="text-[10px] text-muted-foreground">Aplicar de la factura más vieja a la nueva</span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer select-none">
+                        <input type="checkbox" {...register('auto_aplicar_pago')} className="sr-only peer" />
+                        <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                      </label>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-2 border-t border-brand-500/10 mt-1">
+                    {/* Usar crédito automáticamente */}
+                    <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-[10px] text-muted-foreground block font-semibold uppercase tracking-wider">Próximo Total Cobrado</span>
-                        <span className="text-lg font-mono font-black text-brand-400">${nextInvoiceTotal.toFixed(2)}</span>
+                        <span className="text-xs font-semibold text-foreground block">Usar Crédito Automático</span>
+                        <span className="text-[10px] text-muted-foreground">Consumir saldo a favor en facturas recurrentes</span>
                       </div>
-                      <div className="text-left sm:text-right shrink-0">
-                        <span className="text-[10px] text-muted-foreground block font-semibold uppercase tracking-wider">Mensualidad Recurrente Posterior</span>
-                        <span className="text-sm font-mono font-bold text-brand-300">${futureMonthlyTotal.toFixed(2)}/mes</span>
+                      <label className="relative inline-flex items-center cursor-pointer select-none">
+                        <input type="checkbox" {...register('usar_credito_auto')} className="sr-only peer" />
+                        <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                      </label>
+                    </div>
+
+                    {/* Prorrateo separado */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-semibold text-foreground block">Prorratear Inicial Separado</span>
+                        <span className="text-[10px] text-muted-foreground">Facturar el período parcial de forma independiente</span>
                       </div>
+                      <label className="relative inline-flex items-center cursor-pointer select-none">
+                        <input type="checkbox" {...register('prorrateo_separado')} className="sr-only peer" />
+                        <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                      </label>
                     </div>
                   </div>
                 </div>
 
+                {/* Simulación de Facturación */}
+                <div className="glass-card p-5 border border-border/60 bg-secondary/10 space-y-3 flex flex-col justify-between">
+                  {(() => {
+                    const { firstInvoice, nextInvoice } = getSimulation()
+                    return (
+                      <div className="space-y-3">
+                        <div className="text-[11px] font-bold text-brand-400 uppercase tracking-wider">
+                          Simulación de Facturación Proyectada
+                        </div>
+
+                        {/* Primera factura después del cambio */}
+                        <div className="bg-brand-500/10 border border-brand-500/20 rounded-xl p-3.5 space-y-2">
+                          <div className="flex justify-between items-center pb-1.5 border-b border-brand-500/10">
+                            <span className="text-[10px] font-bold text-brand-300 uppercase">
+                              Primera factura después del cambio
+                            </span>
+                            <span className="text-sm font-mono font-black text-brand-400">
+                              ${firstInvoice.monto.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-y-1 text-[10px] text-muted-foreground">
+                            <span>Plan:</span>
+                            <span className="text-right text-foreground font-medium">{firstInvoice.nombrePlan}</span>
+
+                            <span>Período:</span>
+                            <span className="text-right text-foreground font-mono">
+                              {firstInvoice.periodoDesde} al {firstInvoice.periodoHasta}
+                            </span>
+
+                            <span>Fecha Emisión:</span>
+                            <span className="text-right text-foreground font-mono">{firstInvoice.fechaCreacion}</span>
+
+                            <span>Fecha Vencimiento:</span>
+                            <span className="text-right text-foreground font-mono">{firstInvoice.fechaVencimiento}</span>
+                          </div>
+                        </div>
+
+                        {/* Facturas siguientes */}
+                        <div className="bg-secondary/10 border border-border/40 rounded-xl p-3.5 space-y-2">
+                          <div className="flex justify-between items-center pb-1.5 border-b border-border/20">
+                            <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                              Facturas siguientes
+                            </span>
+                            <span className="text-sm font-mono font-bold text-foreground">
+                              ${nextInvoice.monto.toFixed(2)}/mes
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-y-1 text-[10px] text-muted-foreground">
+                            <span>Plan:</span>
+                            <span className="text-right text-foreground font-medium">{nextInvoice.nombrePlan}</span>
+
+                            <span>Período Estimado:</span>
+                            <span className="text-right text-foreground font-mono">
+                              {nextInvoice.periodoDesde} al {nextInvoice.periodoHasta}
+                            </span>
+
+                            <span>Fecha Emisión:</span>
+                            <span className="text-right text-foreground font-mono">{nextInvoice.fechaCreacion}</span>
+
+                            <span>Fecha Vencimiento:</span>
+                            <span className="text-right text-foreground font-mono">{nextInvoice.fechaVencimiento}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 4: RED */}
+          {step === 4 && (
+            <div className="space-y-5 max-w-3xl mx-auto py-4 animate-fade-in">
+              <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
+                <Wifi className="w-4 h-4" /> Configuración de Red e Internet
+              </div>
+
+              <div className="glass-card p-6 border border-border/60 space-y-4 bg-secondary/10">
                 {/* Router asignado y Tipo de Conexión */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-border/40 pt-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 font-sans">
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">Router asignado *</label>
-                    <select {...register('router_id')} className="input-field cursor-pointer">
+                    <select {...register('router_id')} className="input-field cursor-pointer font-sans">
                       <option value="">Seleccione router</option>
                       {routers.map((r) => (
                         <option key={r.id} value={r.id}>{r.nombre} ({r.ip})</option>
@@ -995,7 +1434,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">Tipo de Conexión *</label>
-                    <select {...register('tipo')} className="input-field cursor-pointer">
+                    <select {...register('tipo')} className="input-field cursor-pointer font-sans">
                       <option value="static">IP Estática</option>
                       <option value="pppoe">PPPoE</option>
                     </select>
@@ -1071,8 +1510,90 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
             </div>
           )}
 
+          {/* PASO 5: AVISOS */}
+          {step === 5 && (
+            <div className="space-y-6 max-w-3xl mx-auto py-4 animate-fade-in">
+              <div className="bg-brand-500/10 border border-brand-500/30 rounded-xl p-4 flex gap-3.5 items-start">
+                <div className="p-2 bg-brand-500/20 text-brand-400 rounded-lg shrink-0">
+                  <Bell className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-brand-300">Configuración de Avisos y Notificaciones</h4>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed font-sans font-medium">
+                    Este módulo se encuentra en fase de diseño técnico. Las opciones seleccionadas a continuación 
+                    servirán como pre-configuración y se vincularán automáticamente cuando se active la pasarela 
+                    de notificaciones automáticas y alertas.
+                  </p>
+                </div>
+              </div>
+
+              <div className="glass-card p-5 border border-border/60 space-y-4 bg-secondary/10">
+                <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
+                  <Bell className="w-4 h-4" /> Canales de Notificación Activos
+                </div>
+
+                <p className="text-xs text-muted-foreground font-sans font-medium">
+                  Seleccione los medios por los cuales el cliente recibirá estados de cuenta, alertas de pago y avisos de mantenimiento.
+                </p>
+
+                <div className="space-y-3.5 pt-2">
+                  {/* Canal WhatsApp */}
+                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/30 border border-border/40">
+                    <div className="flex items-center gap-3 font-sans">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 border border-emerald-500/20">
+                        <span className="font-semibold text-xs">WA</span>
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium text-foreground block">WhatsApp</span>
+                        <span className="text-xs text-muted-foreground">Mensajes de cobro y recordatorios</span>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer select-none">
+                      <input type="checkbox" {...register('notif_whatsapp')} className="sr-only peer" />
+                      <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                    </label>
+                  </div>
+
+                  {/* Canal Correo */}
+                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/30 border border-border/40">
+                    <div className="flex items-center gap-3 font-sans">
+                      <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20">
+                        <span className="font-semibold text-xs">@</span>
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium text-foreground block">Correo Electrónico</span>
+                        <span className="text-xs text-muted-foreground">Reportes de red y facturas PDF</span>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer select-none">
+                      <input type="checkbox" {...register('notif_email')} className="sr-only peer" />
+                      <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                    </label>
+                  </div>
+
+                  {/* Canal SMS */}
+                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/30 border border-border/40">
+                    <div className="flex items-center gap-3 font-sans">
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-400 border border-amber-500/20">
+                        <span className="font-semibold text-xs">SMS</span>
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium text-foreground block">Mensajería SMS</span>
+                        <span className="text-xs text-muted-foreground">Alertas críticas de suspensión</span>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer select-none">
+                      <input type="checkbox" {...register('notif_sms')} className="sr-only peer" />
+                      <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Acciones del Modal */}
-          <div className="flex justify-end items-center gap-3 border-t border-border/50 pt-4 mt-6">
+          <div className="flex justify-between items-center border-t border-border/50 pt-4 mt-6">
             <button
               type="button"
               onClick={onClose}
@@ -1081,14 +1602,36 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
               Cancelar
             </button>
 
-            <button
-              type="submit"
-              disabled={saveMutation.isPending}
-              className="btn-primary w-44 justify-center"
-            >
-              {saveMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-              {saveMutation.isPending ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Registrar cliente'}
-            </button>
+            <div className="flex gap-3">
+              {step > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setStep((prev) => (prev - 1) as any)}
+                  className="btn-secondary w-32 justify-center cursor-pointer font-sans font-semibold"
+                >
+                  Volver
+                </button>
+              )}
+
+              {step < 5 ? (
+                <button
+                  type="button"
+                  onClick={() => setStep((prev) => (prev + 1) as any)}
+                  className="btn-primary w-32 justify-center cursor-pointer font-sans font-semibold"
+                >
+                  Siguiente
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={saveMutation.isPending}
+                  className="btn-primary w-44 justify-center cursor-pointer font-sans font-semibold"
+                >
+                  {saveMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {saveMutation.isPending ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Registrar cliente'}
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </div>

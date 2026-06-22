@@ -325,6 +325,13 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
         tipo=payload.tipo,
         activo=True,
         email=payload.email,
+        inicio_facturacion=payload.inicio_facturacion,
+        dia_inicio_periodo=payload.dia_inicio_periodo,
+        crear_factura_anticipo_dias=payload.crear_factura_anticipo_dias,
+        tipo_facturacion=payload.tipo_facturacion,
+        auto_aplicar_pago=payload.auto_aplicar_pago,
+        usar_credito_auto=payload.usar_credito_auto,
+        prorrateo_separado=payload.prorrateo_separado,
     )
     if payload.custom_service_ids:
         client.custom_services = db.query(CustomService).filter(CustomService.id.in_(payload.custom_service_ids)).all()

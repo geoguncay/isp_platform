@@ -36,6 +36,13 @@ class Client(Base):
     tipo: Mapped[str] = mapped_column(String(20), nullable=False, default="static")  # "static" o "pppoe"
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     email: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    inicio_facturacion: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dia_inicio_periodo: Mapped[int] = mapped_column(default=1)
+    crear_factura_anticipo_dias: Mapped[int] = mapped_column(default=0)
+    tipo_facturacion: Mapped[str] = mapped_column(String(20), default="forward")
+    auto_aplicar_pago: Mapped[bool] = mapped_column(Boolean, default=True)
+    usar_credito_auto: Mapped[bool] = mapped_column(Boolean, default=True)
+    prorrateo_separado: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

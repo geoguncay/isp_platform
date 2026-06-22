@@ -87,6 +87,13 @@ def run_migrations(bind_engine) -> None:
                 PRIMARY KEY (invoice_id, custom_service_id)
             );
             """))
+            conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS inicio_facturacion TIMESTAMP WITH TIME ZONE;"))
+            conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS dia_inicio_periodo INTEGER DEFAULT 1;"))
+            conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS crear_factura_anticipo_dias INTEGER DEFAULT 0;"))
+            conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS tipo_facturacion VARCHAR(20) DEFAULT 'forward';"))
+            conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS auto_aplicar_pago BOOLEAN DEFAULT TRUE;"))
+            conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS usar_credito_auto BOOLEAN DEFAULT TRUE;"))
+            conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS prorrateo_separado BOOLEAN DEFAULT TRUE;"))
             conn.commit()
 
 

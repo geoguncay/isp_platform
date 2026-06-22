@@ -460,181 +460,163 @@ export function ClientProfilePage() {
                 <p className="text-xs text-muted-foreground font-mono">ID: {client.id}</p>
               </div>
 
-              {/* Grid Datos */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-border/50 pt-4">
-                <div className="flex items-start gap-3">
-                  <Shield className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Cédula</p>
-                    <p className="text-sm font-semibold text-foreground font-mono">{client.cedula}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <Phone className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Teléfono</p>
-                    <p className="text-sm font-semibold text-foreground">{client.telefono}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <Mail className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Correo Electrónico</p>
-                    <p className="text-sm font-semibold text-foreground">{client.email || '—'}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <MapPin className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Dirección</p>
-                    <p className="text-sm font-semibold text-foreground">{client.direccion}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <Wifi className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Tipo de Conexión</p>
-                    <p className="text-sm font-semibold text-foreground font-sans">
-                      <span className="capitalize">{client.tipo === 'static' ? 'IP Estática' : 'PPPoE'}</span>
-                      <span className="text-muted-foreground text-xs font-normal"> en {client.router_nombre ?? 'Router Desconocido'}</span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <MapPin className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Sitio / Ubicación</p>
-                    <p className="text-sm font-semibold text-foreground">
-                      {client.site_nombre ? (
-                        <span className="inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 border border-brand-500/20">
-                          {client.site_nombre}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground italic">Sin Sitio</span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <Calendar className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Fecha de Registro</p>
-                    <p className="text-sm font-semibold text-foreground">
-                      {new Date(client.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Valores Agregados */}
-                <div className="flex items-start gap-3 col-span-1 sm:col-span-2 border-t border-border/30 pt-3 mt-1 font-sans">
-                  <Shield className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                  <div className="w-full">
-                    <p className="text-xs text-muted-foreground">Servicios Adicionales (Valores Agregados)</p>
-                    <div className="flex flex-wrap gap-2 mt-1.5">
-                      {client.custom_services && client.custom_services.length > 0 ? (
-                        client.custom_services.map((cs: any) => (
-                          <span
-                            key={cs.id}
-                            className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded border ${
-                              cs.recurrente
-                                ? 'bg-brand-500/10 text-brand-400 border-brand-500/20'
-                                : 'bg-purple-500/10 text-purple-400 border-purple-500/20'
-                            }`}
-                            title={cs.descripcion || ''}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${
-                              cs.recurrente ? 'bg-brand-400' : 'bg-purple-400'
-                            }`} />
-                            {cs.nombre} (${Number(cs.precio).toFixed(2)})
-                            {!cs.recurrente && <span className="text-[9px] uppercase font-bold tracking-wider ml-1 bg-purple-500/20 px-1 py-0.2 rounded border border-purple-500/30">Único</span>}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-muted-foreground italic">Ningún servicio adicional asignado</span>
-                      )}
+              {/* Grid Datos Agrupados */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 border-t border-border/50 pt-5 mt-2">
+                
+                {/* 1. Datos Personales */}
+                <div className="glass-card p-4 border border-border/60 bg-secondary/5 space-y-4 font-sans">
+                  <h3 className="text-xs font-bold text-brand-400 uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/30">
+                    <User className="w-3.5 h-3.5" /> Información Personal
+                  </h3>
+                  <div className="space-y-3 text-xs">
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Identificación:</span>
+                      <span className="font-semibold text-foreground font-mono">{client.cedula}</span>
                     </div>
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Teléfono:</span>
+                      <span className="font-semibold text-foreground">{client.telefono}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Correo:</span>
+                      <span className="font-semibold text-foreground break-all">{client.email || '—'}</span>
+                    </div>
+                    <div className="flex flex-col py-1 border-b border-border/20 gap-0.5">
+                      <span className="text-muted-foreground">Dirección:</span>
+                      <span className="font-semibold text-foreground leading-normal">{client.direccion}</span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span className="text-muted-foreground">Fecha Registro:</span>
+                      <span className="font-semibold text-foreground">{new Date(client.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Plan y Facturación */}
+                <div className="glass-card p-4 border border-border/60 bg-secondary/5 space-y-4 font-sans">
+                  <h3 className="text-xs font-bold text-brand-400 uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/30">
+                    <CreditCard className="w-3.5 h-3.5" /> Plan y Facturación
+                  </h3>
+                  <div className="space-y-3 text-xs">
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Plan Contratado:</span>
+                      <span className="font-bold text-brand-300">
+                        {client.plan_activo?.nombre || 'Sin Plan'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Mensualidad:</span>
+                      <span className="font-mono font-bold text-foreground">
+                        ${Number(client.plan_activo?.precio || 0).toFixed(2)}/mes
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Inicio Facturación:</span>
+                      <span className="font-semibold text-foreground font-mono">
+                        {client.inicio_facturacion ? new Date(client.inicio_facturacion).toLocaleDateString() : '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Ciclo:</span>
+                      <span className="font-semibold text-foreground">
+                        Día {client.dia_inicio_periodo || 1} ({client.tipo_facturacion === 'backward' ? 'Vencido' : 'Adelantado'})
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Anticipación / Prorrateo:</span>
+                      <span className="font-semibold text-foreground">
+                        {client.crear_factura_anticipo_dias || 0} días / {client.prorrateo_separado ? 'Sep.' : 'Comb.'}
+                      </span>
+                    </div>
+                    <div className="flex flex-col py-1 gap-1">
+                      <span className="text-muted-foreground">Servicios Adicionales:</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {client.custom_services && client.custom_services.length > 0 ? (
+                          client.custom_services.map((cs: any) => (
+                            <span
+                              key={cs.id}
+                              className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                                cs.recurrente
+                                  ? 'bg-brand-500/10 text-brand-400 border-brand-500/20'
+                                  : 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                              }`}
+                              title={cs.descripcion || ''}
+                            >
+                              {cs.nombre} (${Number(cs.precio).toFixed(2)})
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground italic">Ninguno</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Conectividad y Red */}
+                <div className="glass-card p-4 border border-border/60 bg-secondary/5 space-y-4 font-sans">
+                  <h3 className="text-xs font-bold text-brand-400 uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-border/30">
+                    <Wifi className="w-3.5 h-3.5" /> Conectividad y Red
+                  </h3>
+                  <div className="space-y-3 text-xs">
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Tipo Conexión:</span>
+                      <span className="font-semibold text-foreground uppercase">{client.tipo === 'static' ? 'IP Estática' : 'PPPoE'}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Router Asignado:</span>
+                      <span className="font-semibold text-foreground truncate max-w-[150px]">{client.router_nombre ?? '—'}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-border/20">
+                      <span className="text-muted-foreground">Sitio / Ubicación:</span>
+                      <span className="font-semibold text-foreground font-sans">
+                        {client.site_nombre ? (
+                          <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.2 rounded bg-brand-500/10 text-brand-400 border border-brand-500/20">
+                            {client.site_nombre}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </span>
+                    </div>
+
+                    {client.tipo === 'static' ? (
+                      <>
+                        <div className="flex justify-between py-1 border-b border-border/20">
+                          <span className="text-muted-foreground">Dirección IP:</span>
+                          <span className="font-semibold text-foreground font-mono">{client.static_ip?.ip ?? 'No Asignada'}</span>
+                        </div>
+                        <div className="flex justify-between py-1">
+                          <span className="text-muted-foreground">Dirección MAC:</span>
+                          <span className="font-semibold text-foreground font-mono">{client.static_ip?.mac ?? 'No Registrada'}</span>
+                        </div>
+                        {client.static_ip?.notas && (
+                          <div className="flex flex-col py-1 border-t border-border/20 mt-1 gap-0.5">
+                            <span className="text-muted-foreground">Notas de IP:</span>
+                            <span className="text-foreground leading-normal italic">{client.static_ip.notas}</span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex justify-between py-1 border-b border-border/20">
+                          <span className="text-muted-foreground">Usuario PPPoE:</span>
+                          <span className="font-semibold text-foreground font-mono">{client.pppoe_secret?.usuario_ppp ?? 'No Configurado'}</span>
+                        </div>
+                        <div className="flex justify-between py-1">
+                          <span className="text-muted-foreground">Contraseña:</span>
+                          <span className="font-semibold text-foreground font-mono">{client.pppoe_secret?.contraseña_ppp ?? 'No Configurada'}</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
 
-              {/* Información de Red (solo si es estática) */}
-              {client.tipo === 'static' && (
-                <div className="border-t border-border/50 pt-4 mt-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold text-brand-400 uppercase tracking-wider">Información de Red</h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-secondary/20 p-3 rounded-lg border border-border/40 font-sans">
-                    <div className="flex items-start gap-3">
-                      <Wifi className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Dirección IP</p>
-                        <p className="text-sm font-semibold text-foreground font-mono">
-                          {client.static_ip?.ip ?? 'No asignada'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3">
-                      <Shield className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Dirección MAC</p>
-                        <p className="text-sm font-semibold text-foreground font-mono">
-                          {client.static_ip?.mac ?? 'No registrada'}
-                        </p>
-                      </div>
-                    </div>
-
-                    {client.static_ip?.notas && (
-                      <div className="flex items-start gap-3 sm:col-span-2 border-t border-border/30 pt-2.5 mt-1 font-sans">
-                        <AlertCircle className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                        <div>
-                          <p className="text-xs text-muted-foreground">Notas</p>
-                          <p className="text-sm text-foreground">{client.static_ip.notas}</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Información de PPPoE (solo si es pppoe) */}
+              {/* Estado de la Sesión en tiempo real (solo si es pppoe) */}
               {client.tipo === 'pppoe' && (
                 <div className="border-t border-border/50 pt-4 mt-4 space-y-3 font-sans">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold text-brand-400 uppercase tracking-wider">Credenciales y Sesión PPPoE</h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-secondary/20 p-3 rounded-lg border border-border/40">
-                    <div className="flex items-start gap-3">
-                      <User className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Usuario PPPoE</p>
-                        <p className="text-sm font-semibold text-foreground font-mono">
-                          {client.pppoe_secret?.usuario_ppp ?? 'No configurado'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3">
-                      <Shield className="w-4 h-4 text-brand-400 mt-1 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Contraseña PPPoE</p>
-                        <p className="text-sm font-semibold text-foreground font-mono">
-                          {client.pppoe_secret?.contraseña_ppp ?? 'No configurada'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Estado de la Sesión en tiempo real */}
-                  <div className="bg-secondary/10 p-4 rounded-lg border border-border/30 mt-3 space-y-3">
+                  <div className="bg-secondary/10 p-4 rounded-lg border border-border/30 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-muted-foreground uppercase">Estado de Sesión Activa</span>
                       {activeSession ? (
