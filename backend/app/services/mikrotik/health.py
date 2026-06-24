@@ -9,16 +9,16 @@ from typing import Any
 
 from app.core.redis import GATEWAY_HEALTH_PREFIX, ROUTER_STATUS_TTL, redis_client
 from app.models.gateway import Gateway
-from app.schemas.router import RouterStatus
-from app.services.mikrotik.gateway_pool import GatewayConnectionError, router_pool
+from app.schemas.gateway import GatewayStatus
+from app.services.mikrotik.gateway_pool import GatewayConnectionError, gateway_pool
 
 logger = logging.getLogger(__name__)
 
 
-async def check_gateway_health(gateway: Gateway) -> RouterStatus:
+async def check_gateway_health(gateway: Gateway) -> GatewayStatus:
     """
     Conecta al router, obtiene versión ROS e interfaces, cachea en Redis.
-    No lanza excepciones — siempre devuelve un RouterStatus.
+    No lanza excepciones — siempre devuelve un GatewayStatus.
     """
     now = datetime.now(timezone.utc)
     cache_key = f"{GATEWAY_HEALTH_PREFIX}{gateway.id}"
@@ -28,7 +28,7 @@ async def check_gateway_health(gateway: Gateway) -> RouterStatus:
         uptime: str | None = None
         interfaces: list[dict[str, Any]] = []
 
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             # Versión RouterOS y uptime
             sys_resource = list(api("/system/resource/print"))
             if sys_resource:
@@ -50,7 +50,7 @@ async def check_gateway_health(gateway: Gateway) -> RouterStatus:
                 for iface in iface_list[:20]  # máximo 20 interfaces
             ]
 
-        status = RouterStatus(
+        status = GatewayStatus(
             gateway_id=gateway.id,
             status="online",
             ip=gateway.ip,
@@ -63,7 +63,7 @@ async def check_gateway_health(gateway: Gateway) -> RouterStatus:
 
     except GatewayConnectionError as e:
         logger.warning(f"Router {gateway.nombre} offline: {e}")
-        status = RouterStatus(
+        status = GatewayStatus(
             gateway_id=gateway.id,
             status="offline",
             ip=gateway.ip,
@@ -81,9 +81,16 @@ async def check_gateway_health(gateway: Gateway) -> RouterStatus:
     return status
 
 
-async def get_cached_router_status(gateway_id: str) -> RouterStatus | None:
+async def get_cached_gateway_status(gateway_id: str) -> GatewayStatus | None:
     """Lee el estado cacheado de Redis. Devuelve None si no hay caché."""
     data = await redis_client.get(f"{GATEWAY_HEALTH_PREFIX}{gateway_id}")
     if data is None:
         return None
-    return RouterStatus.model_validate_json(data)
+    return GatewayStatus.model_validate_json(data)
+
+
+# Compatibility aliases for legacy code
+RouterStatus = GatewayStatus
+check_router_health = check_gateway_health
+get_cached_router_status = get_cached_gateway_status
+

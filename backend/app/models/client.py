@@ -66,6 +66,23 @@ class Client(Base):
     custom_services = relationship("CustomService", secondary=client_custom_services_association)
 
     @property
+    def router(self):
+        return self.gateway
+
+    @router.setter
+    def router(self, value) -> None:
+        self.gateway = value
+
+    @property
+    def router_id(self) -> uuid.UUID:
+        return self.gateway_id
+
+    @router_id.setter
+    def router_id(self, value: uuid.UUID) -> None:
+        self.gateway_id = value
+
+
+    @property
     def site_id(self) -> uuid.UUID | None:
         return self.gateway.site_id if self.gateway else None
 
@@ -75,3 +92,4 @@ class Client(Base):
 
     def __repr__(self) -> str:
         return f"<Client id={self.id} nombre={self.nombre} cedula={self.cedula}>"
+

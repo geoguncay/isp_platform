@@ -3,7 +3,7 @@ Servicio MikroTik para gestionar colas de ancho de banda (Simple Queues).
 """
 import logging
 from app.models.gateway import Gateway
-from app.services.mikrotik.gateway_pool import router_pool
+from app.services.mikrotik.gateway_pool import gateway_pool
 from librouteros.query import Key
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ def get_or_create_parent_queue(api, name: str = "isp_padre") -> str:
 
 
 def sync_client_queue(
-    router: Router,
+    gateway: Gateway,
     client_name: str,
     ip: str,
     speed_up: int,  # in Kbps
@@ -88,7 +88,7 @@ def sync_client_queue(
     max_limit = f"{speed_up}k/{speed_down}k"
 
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             # Sanear y resolver la cola padre
             clean_parent = get_clean_parent_name(parent)
             parent_name = get_or_create_parent_queue(api, clean_parent)
@@ -134,59 +134,59 @@ def sync_client_queue(
                 entry_id = entry.get(".id")
                 # Actualizar cola existente
                 list(api("/queue/simple/set", **{".id": entry_id, **params}))
-                logger.info(f"Cola simple actualizada en {router.nombre} para cliente {client_name} (IP: {ip}, Límite: {max_limit})")
+                logger.info(f"Cola simple actualizada en {gateway.nombre} para cliente {client_name} (IP: {ip}, Límite: {max_limit})")
             else:
                 # Crear nueva cola simple
                 list(api("/queue/simple/add", **params))
-                logger.info(f"Cola simple creada en {router.nombre} para cliente {client_name} (IP: {ip}, Límite: {max_limit})")
+                logger.info(f"Cola simple creada en {gateway.nombre} para cliente {client_name} (IP: {ip}, Límite: {max_limit})")
 
     except Exception as e:
-        logger.error(f"Error al sincronizar cola simple para IP {ip} en {router.nombre}: {e}")
+        logger.error(f"Error al sincronizar cola simple para IP {ip} en {gateway.nombre}: {e}")
         raise e
 
 
-def remove_client_queue(router: Router, ip: str) -> None:
+def remove_client_queue(gateway: Gateway, ip: str) -> None:
     """
     Remueve la cola simple de un cliente en MikroTik basándose en su target IP.
     """
     target_ip = f"{ip}/32"
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             query = api.path('/queue/simple').select().where(Key('target') == target_ip)
             existing = list(query)
             for entry in existing:
                 entry_id = entry.get(".id")
                 list(api("/queue/simple/remove", **{".id": entry_id}))
-                logger.info(f"Cola simple para IP {ip} removida en {router.nombre}")
+                logger.info(f"Cola simple para IP {ip} removida en {gateway.nombre}")
     except Exception as e:
-        logger.error(f"Error al remover cola simple para IP {ip} en {router.nombre}: {e}")
+        logger.error(f"Error al remover cola simple para IP {ip} en {gateway.nombre}: {e}")
         raise e
 
 
-def toggle_client_queue(router: Router, ip: str, disabled: bool) -> None:
+def toggle_client_queue(gateway: Gateway, ip: str, disabled: bool) -> None:
     """
     Habilita o desactiva la cola simple de un cliente en MikroTik basándose en su target IP.
     """
     target_ip = f"{ip}/32"
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             query = api.path('/queue/simple').select().where(Key('target') == target_ip)
             existing = list(query)
             for entry in existing:
                 entry_id = entry.get(".id")
                 list(api("/queue/simple/set", **{".id": entry_id, "disabled": disabled}))
-                logger.info(f"Cola simple para IP {ip} {'deshabilitada' if disabled else 'habilitada'} en {router.nombre}")
+                logger.info(f"Cola simple para IP {ip} {'deshabilitada' if disabled else 'habilitada'} en {gateway.nombre}")
     except Exception as e:
-        logger.error(f"Error al cambiar estado de cola simple para IP {ip} en {router.nombre}: {e}")
+        logger.error(f"Error al cambiar estado de cola simple para IP {ip} en {gateway.nombre}: {e}")
         raise e
 
 
-def fetch_queues(router: Router) -> list[dict]:
+def fetch_queues(gateway: Gateway) -> list[dict]:
     """
     Obtiene la lista completa de colas simples del router MikroTik.
     """
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             queues = list(api.path('/queue/simple'))
             return [
                 {
@@ -202,18 +202,18 @@ def fetch_queues(router: Router) -> list[dict]:
                 for q in queues
             ]
     except Exception as e:
-        logger.error(f"Error al obtener colas del router {router.nombre}: {e}")
+        logger.error(f"Error al obtener colas del router {gateway.nombre}: {e}")
         raise e
 
 
-def update_parent_queue_limit(router: Router, limit_up_mbps: int, limit_down_mbps: int) -> None:
+def update_parent_queue_limit(gateway: Gateway, limit_up_mbps: int, limit_down_mbps: int) -> None:
     """
     Actualiza el límite de la cola simple padre ('isp_padre', 'PADRE' o 'total').
     Si no existe la cola padre, la crea.
     """
     max_limit = f"{limit_up_mbps}M/{limit_down_mbps}M"
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             parent_name = get_or_create_parent_queue(api, "isp_padre")
             # Buscar la cola padre para obtener su id
             query = api.path('/queue/simple').select().where(Key('name') == parent_name)
@@ -221,22 +221,22 @@ def update_parent_queue_limit(router: Router, limit_up_mbps: int, limit_down_mbp
             if existing:
                 entry_id = existing[0].get(".id")
                 list(api("/queue/simple/set", **{".id": entry_id, "max-limit": max_limit}))
-                logger.info(f"Límite de cola padre '{parent_name}' actualizado a {max_limit} en {router.nombre}")
+                logger.info(f"Límite de cola padre '{parent_name}' actualizado a {max_limit} en {gateway.nombre}")
             else:
                 list(api("/queue/simple/add", name="isp_padre", target="0.0.0.0/0", **{"max-limit": max_limit}))
-                logger.info(f"Cola padre 'isp_padre' creada con límite {max_limit} en {router.nombre}")
+                logger.info(f"Cola padre 'isp_padre' creada con límite {max_limit} en {gateway.nombre}")
     except Exception as e:
-        logger.error(f"Error al actualizar límite de cola padre en {router.nombre}: {e}")
+        logger.error(f"Error al actualizar límite de cola padre en {gateway.nombre}: {e}")
         raise e
 
 
-def get_parent_queue_limit(router: Router) -> dict:
+def get_parent_queue_limit(gateway: Gateway) -> dict:
     """
     Obtiene los límites actuales de subida y bajada de la cola simple padre ('isp_padre', 'PADRE' o 'total').
     Retorna un diccionario con limit_up y limit_down en Mbps, o None si no tiene límites o no existe.
     """
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             # Buscar cola llamada 'isp_padre'
             query = api.path('/queue/simple').select().where(Key('name') == 'isp_padre')
             existing = list(query)
@@ -276,26 +276,26 @@ def get_parent_queue_limit(router: Router) -> dict:
                     pass
             return {"name": "isp_padre", "limit_up": 0, "limit_down": 0}
     except Exception as e:
-        logger.error(f"Error al obtener límites de cola padre en {router.nombre}: {e}")
+        logger.error(f"Error al obtener límites de cola padre en {gateway.nombre}: {e}")
         return {"name": "isp_padre", "limit_up": 0, "limit_down": 0}
 
 
-def sync_router_parent_queue(router: Router, old_parent_name: str | None = None) -> None:
+def sync_router_parent_queue(gateway: Gateway, old_parent_name: str | None = None) -> None:
     """
     Crea o actualiza la cola simple padre asociada a este router en MikroTik.
     Soporta el renombrado de la cola si cambia de nombre para evitar duplicar recursos.
     """
-    if not router.control_velocidad:
+    if not gateway.control_velocidad:
         return
 
     # Si cola_padre no está configurada, usar el default isp_padre
-    parent_name = get_clean_parent_name(router.cola_padre)
-    limit_up = router.ancho_banda_up or 0
-    limit_down = router.ancho_banda_down or 0
+    parent_name = get_clean_parent_name(gateway.cola_padre)
+    limit_up = gateway.ancho_banda_up or 0
+    limit_down = gateway.ancho_banda_down or 0
     max_limit = f"{limit_up}M/{limit_down}M" if (limit_up > 0 or limit_down > 0) else "0/0"
 
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             # 1. Si cambió el nombre de la cola padre, renombrar la existente
             if old_parent_name:
                 clean_old = get_clean_parent_name(old_parent_name)
@@ -305,7 +305,7 @@ def sync_router_parent_queue(router: Router, old_parent_name: str | None = None)
                     if existing_old:
                         entry_id = existing_old[0].get(".id")
                         list(api("/queue/simple/set", **{".id": entry_id, "name": parent_name, "max-limit": max_limit}))
-                        logger.info(f"Cola padre del router renombrada de '{clean_old}' a '{parent_name}' en {router.nombre}")
+                        logger.info(f"Cola padre del router renombrada de '{clean_old}' a '{parent_name}' en {gateway.nombre}")
                         return
 
             # 2. Buscar si ya existe la cola con el nombre nuevo
@@ -315,12 +315,13 @@ def sync_router_parent_queue(router: Router, old_parent_name: str | None = None)
                 entry_id = existing[0].get(".id")
                 # Si existe, actualizamos su límite
                 list(api("/queue/simple/set", **{".id": entry_id, "max-limit": max_limit}))
-                logger.info(f"Cola padre del router '{parent_name}' actualizada con límite {max_limit} en {router.nombre}")
+                logger.info(f"Cola padre del router '{parent_name}' actualizada con límite {max_limit} en {gateway.nombre}")
             else:
                 # Si no existe, la creamos
                 list(api("/queue/simple/add", name=parent_name, target="0.0.0.0/0", **{"max-limit": max_limit}))
-                logger.info(f"Cola padre del router '{parent_name}' creada con límite {max_limit} en {router.nombre}")
+                logger.info(f"Cola padre del router '{parent_name}' creada con límite {max_limit} en {gateway.nombre}")
     except Exception as e:
-        logger.error(f"Error al sincronizar cola padre para el router {router.nombre}: {e}")
+        logger.error(f"Error al sincronizar cola padre para el router {gateway.nombre}: {e}")
         raise e
+
 

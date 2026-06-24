@@ -12,7 +12,7 @@ from librouteros import connect
 from librouteros.api import Api
 
 from app.core.security import decrypt_secret
-from app.models.router import Router
+from app.models.gateway import Gateway
 
 logger = logging.getLogger(__name__)
 
@@ -46,35 +46,35 @@ class GatewayPool:
         return self._semaphores[router_id]
 
     @contextmanager
-    def connect_to(self, router: Router) -> Generator[Api, None, None]:
+    def connect_to(self, gateway: Gateway) -> Generator[Api, None, None]:
         """
         Context manager síncrono que devuelve una conexión activa al router.
         Descifra la contraseña con Fernet antes de conectar.
         Lanza GatewayConnectionError si falla la conexión.
         """
-        password = decrypt_secret(router.password_enc)
+        password = decrypt_secret(gateway.password_enc)
         api: Api | None = None
         try:
             api = connect(
-                host=router.ip,
-                username=router.usuario_api,
+                host=gateway.ip,
+                username=gateway.usuario_api,
                 password=password,
-                port=router.puerto_api,
+                port=gateway.puerto_api,
                 timeout=10,
                 encoding="utf-8",
             )
-            logger.info(f"Conexión establecida a router {router.nombre} ({router.ip})")
+            logger.info(f"Conexión establecida a router {gateway.nombre} ({gateway.ip})")
             yield api
         except librouteros.exceptions.TrapError as e:
-            logger.warning(f"TrapError conectando a {router.nombre}: {e}")
-            raise GatewayConnectionError(f"Error de autenticación en {router.nombre}: {e}") from e
+            logger.warning(f"TrapError conectando a {gateway.nombre}: {e}")
+            raise GatewayConnectionError(f"Error de autenticación en {gateway.nombre}: {e}") from e
         except OSError as e:
-            logger.warning(f"OSError conectando a {router.nombre}: {e}")
+            logger.warning(f"OSError conectando a {gateway.nombre}: {e}")
             raise GatewayConnectionError(
-                f"No se puede alcanzar {router.nombre} ({router.ip}:{router.puerto_api}): {e}"
+                f"No se puede alcanzar {gateway.nombre} ({gateway.ip}:{gateway.puerto_api}): {e}"
             ) from e
         except Exception as e:
-            logger.error(f"Error inesperado conectando a {router.nombre}: {e}")
+            logger.error(f"Error inesperado conectando a {gateway.nombre}: {e}")
             raise GatewayConnectionError(f"Error inesperado: {e}") from e
         finally:
             if api is not None:
@@ -86,3 +86,5 @@ class GatewayPool:
 
 # Singleton global
 gateway_pool = GatewayPool()
+router_pool = gateway_pool  # Fallback compatibility
+

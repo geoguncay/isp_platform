@@ -67,7 +67,7 @@ def sync_poll_gateway(gateway: Gateway, static_ips_map: dict, now: datetime) -> 
     interface_samples = []
 
     try:
-        with router_pool.connect_to(router) as api:
+        with router_pool.connect_to(gateway) as api:
             # 1. Obtener Simple Queues (Tráfico de Clientes)
             try:
                 queues = list(api.path('/queue/simple'))
@@ -83,7 +83,7 @@ def sync_poll_gateway(gateway: Gateway, static_ips_map: dict, now: datetime) -> 
 
                     # Extraer dirección IP (ej: de "192.168.10.15/32" -> "192.168.10.15")
                     ip = target.split('/')[0]
-                    client_id = static_ips_map.get((router.id, ip))
+                    client_id = static_ips_map.get((gateway.id, ip))
 
                     if not client_id:
                         continue
@@ -100,7 +100,7 @@ def sync_poll_gateway(gateway: Gateway, static_ips_map: dict, now: datetime) -> 
                         tx_bytes, rx_bytes = 0, 0
 
                     client_samples.append({
-                        "gateway_id": router.id,
+                        "gateway_id": gateway.id,
                         "cliente_id": client_id,
                         "nombre": name,
                         "rx_bytes": rx_bytes,
@@ -110,7 +110,7 @@ def sync_poll_gateway(gateway: Gateway, static_ips_map: dict, now: datetime) -> 
                         "timestamp": now,
                     })
             except Exception as eq:
-                logger.error(f"Error al consultar colas en {router.nombre}: {eq}")
+                logger.error(f"Error al consultar colas en {gateway.nombre}: {eq}")
 
             # 2. Obtener Interfaces (Consumo Global)
             try:
@@ -126,17 +126,17 @@ def sync_poll_gateway(gateway: Gateway, static_ips_map: dict, now: datetime) -> 
                         continue
 
                     interface_samples.append({
-                        "gateway_id": router.id,
+                        "gateway_id": gateway.id,
                         "interface_name": name,
                         "rx_bytes": rx_bytes,
                         "tx_bytes": tx_bytes,
                         "timestamp": now,
                     })
             except Exception as ei:
-                logger.error(f"Error al consultar interfaces en {router.nombre}: {ei}")
+                logger.error(f"Error al consultar interfaces en {gateway.nombre}: {ei}")
 
     except Exception as e:
-        logger.error(f"Fallo de conexión al colectar tráfico en router {router.nombre}: {e}")
+        logger.error(f"Fallo de conexión al colectar tráfico en router {gateway.nombre}: {e}")
         return [], []
 
     return client_samples, interface_samples
@@ -248,7 +248,7 @@ def poll_traffic():
                 for r in routers:
                     # Correr en un hilo separado de forma no bloqueante
                     task = asyncio.wait_for(
-                        loop.run_in_executor(None, sync_poll_router, r, static_ips_map, now),
+                        loop.run_in_executor(None, sync_poll_gateway, r, static_ips_map, now),
                         timeout=POLL_TRAFFIC_ROUTER_TIMEOUT_SECONDS,
                     )
                     tasks.append(task)

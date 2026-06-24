@@ -3,7 +3,7 @@ Servicio MikroTik para gestionar direcciones IP en el firewall address-list.
 """
 import logging
 from app.models.gateway import Gateway
-from app.services.mikrotik.gateway_pool import router_pool
+from app.services.mikrotik.gateway_pool import gateway_pool
 from librouteros.query import Key
 
 logger = logging.getLogger(__name__)
@@ -23,14 +23,14 @@ def get_clean_list_name(name: str | None) -> str:
     return f"isp_clientes_{name_clean}"
 
 
-def sync_ip_in_address_list(router: Router, ip: str, client_name: str, list_name: str = "isp_clientes") -> None:
+def sync_ip_in_address_list(gateway: Gateway, ip: str, client_name: str, list_name: str = "isp_clientes") -> None:
     """
     Sincroniza una IP estática en la lista de firewall especificada de MikroTik.
     Crea la entrada si no existe, o actualiza el comentario si difiere.
     Remueve la IP de otras listas (excepto suspendidos/isp_suspendidos) si cambió de lista.
     """
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             list_key = Key('list')
             address_key = Key('address')
 
@@ -45,7 +45,7 @@ def sync_ip_in_address_list(router: Router, ip: str, client_name: str, list_name
                     if current_list == "clientes" or (current_list and current_list.startswith("isp_")):
                         entry_id = entry.get(".id")
                         list(api("/ip/firewall/address-list/remove", **{".id": entry_id}))
-                        logger.info(f"IP {ip} removida de lista antigua '{current_list}' en {router.nombre}")
+                        logger.info(f"IP {ip} removida de lista antigua '{current_list}' en {gateway.nombre}")
 
             query = api.path('/ip/firewall/address-list').select().where(
                 list_key == list_name,
@@ -58,21 +58,21 @@ def sync_ip_in_address_list(router: Router, ip: str, client_name: str, list_name
                 # Si el comentario cambió, actualizarlo
                 if entry.get("comment") != client_name:
                     list(api("/ip/firewall/address-list/set", **{".id": entry_id, "comment": client_name}))
-                    logger.info(f"Comentario actualizado para IP {ip} en {router.nombre} (lista '{list_name}'): {client_name}")
+                    logger.info(f"Comentario actualizado para IP {ip} en {gateway.nombre} (lista '{list_name}'): {client_name}")
             else:
                 list(api("/ip/firewall/address-list/add", list=list_name, address=ip, comment=client_name))
-                logger.info(f"IP {ip} agregada a lista '{list_name}' en {router.nombre}")
+                logger.info(f"IP {ip} agregada a lista '{list_name}' en {gateway.nombre}")
     except Exception as e:
-        logger.error(f"Error al sincronizar IP {ip} en {router.nombre}: {e}")
+        logger.error(f"Error al sincronizar IP {ip} en {gateway.nombre}: {e}")
         raise e
 
 
-def remove_ip_from_address_list(router: Router, ip: str) -> None:
+def remove_ip_from_address_list(gateway: Gateway, ip: str) -> None:
     """
     Remueve una IP de todas las listas de firewall administradas por la plataforma en MikroTik.
     """
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             address_key = Key('address')
             query = api.path('/ip/firewall/address-list').select().where(
                 address_key == ip
@@ -84,20 +84,20 @@ def remove_ip_from_address_list(router: Router, ip: str) -> None:
                 if list_name and (list_name.startswith("isp_") or list_name in ("clientes", "suspendidos")):
                     entry_id = entry.get(".id")
                     list(api("/ip/firewall/address-list/remove", **{".id": entry_id}))
-                    logger.info(f"IP {ip} removida de lista '{list_name}' en {router.nombre}")
+                    logger.info(f"IP {ip} removida de lista '{list_name}' en {gateway.nombre}")
     except Exception as e:
-        logger.error(f"Error al remover IP {ip} de las listas en {router.nombre}: {e}")
+        logger.error(f"Error al remover IP {ip} de las listas en {gateway.nombre}: {e}")
         raise e
 
 
-def fetch_clients_from_address_list(router: Router, list_name: str = "isp_clientes") -> list[dict]:
+def fetch_clients_from_address_list(gateway: Gateway, list_name: str = "isp_clientes") -> list[dict]:
     """
     Obtiene todas las entradas de la lista especificada en el router.
     Retorna una lista de diccionarios con la estructura:
       [{"ip": "192.168.10.12", "comment": "Nombre Cliente"}]
     """
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             list_key = Key('list')
             query = api.path('/ip/firewall/address-list').select().where(
                 list_key == list_name
@@ -112,17 +112,17 @@ def fetch_clients_from_address_list(router: Router, list_name: str = "isp_client
                 if entry.get("address")
             ]
     except Exception as e:
-        logger.error(f"Error al obtener clientes de la lista {list_name} en {router.nombre}: {e}")
+        logger.error(f"Error al obtener clientes de la lista {list_name} en {gateway.nombre}: {e}")
         raise e
 
 
-def suspend_ip_in_firewall(router: Router, ip: str, client_name: str) -> None:
+def suspend_ip_in_firewall(gateway: Gateway, ip: str, client_name: str) -> None:
     """
     Agrega una dirección IP a la lista de firewall 'isp_suspendidos' de MikroTik.
     Crea la entrada si no existe, o actualiza el comentario si difiere.
     """
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             list_key = Key('list')
             address_key = Key('address')
             query = api.path('/ip/firewall/address-list').select().where(
@@ -135,21 +135,21 @@ def suspend_ip_in_firewall(router: Router, ip: str, client_name: str) -> None:
                 entry_id = entry.get(".id")
                 if entry.get("comment") != client_name:
                     list(api("/ip/firewall/address-list/set", **{".id": entry_id, "comment": client_name}))
-                    logger.info(f"Comentario actualizado para IP suspendida {ip} en {router.nombre}: {client_name}")
+                    logger.info(f"Comentario actualizado para IP suspendida {ip} en {gateway.nombre}: {client_name}")
             else:
                 list(api("/ip/firewall/address-list/add", list="isp_suspendidos", address=ip, comment=client_name))
-                logger.info(f"IP {ip} agregada a lista 'isp_suspendidos' en {router.nombre}")
+                logger.info(f"IP {ip} agregada a lista 'isp_suspendidos' en {gateway.nombre}")
     except Exception as e:
-        logger.error(f"Error al suspender IP {ip} en {router.nombre}: {e}")
+        logger.error(f"Error al suspender IP {ip} en {gateway.nombre}: {e}")
         raise e
 
 
-def unsuspend_ip_in_firewall(router: Router, ip: str) -> None:
+def unsuspend_ip_in_firewall(gateway: Gateway, ip: str) -> None:
     """
     Remueve una dirección IP de la lista de firewall 'isp_suspendidos' y la legada 'suspendidos'.
     """
     try:
-        with router_pool.connect_to(router) as api:
+        with gateway_pool.connect_to(gateway) as api:
             list_key = Key('list')
             address_key = Key('address')
             
@@ -167,7 +167,8 @@ def unsuspend_ip_in_firewall(router: Router, ip: str) -> None:
             for entry in existing:
                 entry_id = entry.get(".id")
                 list(api("/ip/firewall/address-list/remove", **{".id": entry_id}))
-                logger.info(f"IP {ip} removida de lista '{entry.get('list')}' en {router.nombre}")
+                logger.info(f"IP {ip} removida de lista '{entry.get('list')}' en {gateway.nombre}")
     except Exception as e:
-        logger.error(f"Error al reactivar (unsuspend) IP {ip} en {router.nombre}: {e}")
+        logger.error(f"Error al reactivar (unsuspend) IP {ip} en {gateway.nombre}: {e}")
         raise e
+
