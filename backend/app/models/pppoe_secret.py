@@ -24,8 +24,8 @@ class PPPoESecret(Base):
     perfil_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(native_uuid=False), ForeignKey("pppoe_profiles.id", ondelete="SET NULL"), nullable=True
     )
-    router_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(native_uuid=False), ForeignKey("routers.id", ondelete="CASCADE"), nullable=False
+    gateway_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(native_uuid=False), ForeignKey("gateways.id", ondelete="CASCADE"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -39,13 +39,13 @@ class PPPoESecret(Base):
 
     # Restricción única: router + usuario_ppp (no puede haber dos usuarios ppp iguales en el mismo router)
     __table_args__ = (
-        UniqueConstraint("router_id", "usuario_ppp", name="uq_router_usuario_ppp"),
+        UniqueConstraint("gateway_id", "usuario_ppp", name="uq_gateway_usuario_ppp"),
     )
 
     # Relaciones
     client = relationship("Client", back_populates="pppoe_secret")
-    router = relationship("Router", back_populates="pppoe_secrets")
+    gateway = relationship("Gateway", back_populates="pppoe_secrets")
     perfil = relationship("PPPoEProfile", back_populates="pppoe_secrets")
 
     def __repr__(self) -> str:
-        return f"<PPPoESecret id={self.id} usuario={self.usuario_ppp} router_id={self.router_id}>"
+        return f"<PPPoESecret id={self.id} usuario={self.usuario_ppp} gateway_id={self.gateway_id}>"

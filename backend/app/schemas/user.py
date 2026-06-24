@@ -34,6 +34,10 @@ class UserCreate(BaseModel):
     rol: UserRole = "viewer"
     activo: bool = True
     inactivity_timeout: int = 0
+    tipo_operador: str | None = None
+    permisos_router: str | None = None
+    horario_acceso: str | None = None
+    permisos: str | None = None
 
 
 class UserUpdate(BaseModel):
@@ -43,6 +47,10 @@ class UserUpdate(BaseModel):
     rol: UserRole | None = None
     activo: bool | None = None
     inactivity_timeout: int | None = None
+    tipo_operador: str | None = None
+    permisos_router: str | None = None
+    horario_acceso: str | None = None
+    permisos: str | None = None
 
 
 class UserRead(BaseModel):
@@ -54,6 +62,10 @@ class UserRead(BaseModel):
     rol: UserRole
     activo: bool
     inactivity_timeout: int
+    tipo_operador: str | None
+    permisos_router: str | None
+    horario_acceso: str | None
+    permisos: str | None
     created_at: datetime
     updated_at: datetime
 

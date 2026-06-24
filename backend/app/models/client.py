@@ -25,13 +25,15 @@ class Client(Base):
         Uuid(native_uuid=False), primary_key=True, default=uuid.uuid4
     )
     nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    apellidos: Mapped[str] = mapped_column(String(60), nullable=False, default="")
+    nombres: Mapped[str] = mapped_column(String(60), nullable=False, default="")
     cedula: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
     telefono: Mapped[str] = mapped_column(String(40), nullable=False)
     direccion: Mapped[str] = mapped_column(String(255), nullable=False)
     latitud: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitud: Mapped[float | None] = mapped_column(Float, nullable=True)
-    router_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(native_uuid=False), ForeignKey("routers.id"), nullable=False
+    gateway_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(native_uuid=False), ForeignKey("gateways.id"), nullable=False
     )
     tipo: Mapped[str] = mapped_column(String(20), nullable=False, default="static")  # "static" o "pppoe"
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -54,7 +56,7 @@ class Client(Base):
     )
 
     # Relaciones
-    router = relationship("Router")
+    gateway = relationship("Gateway")
     client_plans = relationship("ClientPlan", back_populates="client", cascade="all, delete-orphan")
     static_ip = relationship("StaticIP", back_populates="client", uselist=False, cascade="all, delete-orphan")
     pppoe_secret = relationship("PPPoESecret", back_populates="client", uselist=False, cascade="all, delete-orphan")
@@ -65,11 +67,11 @@ class Client(Base):
 
     @property
     def site_id(self) -> uuid.UUID | None:
-        return self.router.site_id if self.router else None
+        return self.gateway.site_id if self.gateway else None
 
     @property
     def site_nombre(self) -> str | None:
-        return self.router.site.nombre if (self.router and self.router.site) else None
+        return self.gateway.site.nombre if (self.gateway and self.gateway.site) else None
 
     def __repr__(self) -> str:
         return f"<Client id={self.id} nombre={self.nombre} cedula={self.cedula}>"

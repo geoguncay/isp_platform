@@ -11,13 +11,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core import database
-from app.models.router import Router
+from app.models.gateway import Gateway
 from app.models.static_ip import StaticIP
 from app.models.client import Client
 from app.models.traffic_sample import TrafficSample
 from app.core.redis import redis_client
 from app.workers.celery_app import celery_app
-from app.services.mikrotik.router_pool import router_pool
+from app.services.mikrotik.gateway_pool import router_pool
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def ensure_partition_exists(db: Session, dt: datetime) -> str:
     return partition_name
 
 
-def sync_poll_router(router: Router, static_ips_map: dict, now: datetime) -> tuple[list[dict], list[dict]]:
+def sync_poll_gateway(gateway: Gateway, static_ips_map: dict, now: datetime) -> tuple[list[dict], list[dict]]:
     """
     Consulta síncrona a un router MikroTik para obtener Simple Queues e Interfaces.
     Diseñado para ejecutarse concurridamente en un hilo separado.
@@ -100,7 +100,7 @@ def sync_poll_router(router: Router, static_ips_map: dict, now: datetime) -> tup
                         tx_bytes, rx_bytes = 0, 0
 
                     client_samples.append({
-                        "router_id": router.id,
+                        "gateway_id": router.id,
                         "cliente_id": client_id,
                         "nombre": name,
                         "rx_bytes": rx_bytes,
@@ -126,7 +126,7 @@ def sync_poll_router(router: Router, static_ips_map: dict, now: datetime) -> tup
                         continue
 
                     interface_samples.append({
-                        "router_id": router.id,
+                        "gateway_id": router.id,
                         "interface_name": name,
                         "rx_bytes": rx_bytes,
                         "tx_bytes": tx_bytes,
@@ -142,7 +142,7 @@ def sync_poll_router(router: Router, static_ips_map: dict, now: datetime) -> tup
     return client_samples, interface_samples
 
 
-async def calculate_interface_rates(router_id: uuid.UUID, interface_samples: list[dict], now: datetime, redis_conn) -> list[dict]:
+async def calculate_interface_rates(gateway_id: uuid.UUID, interface_samples: list[dict], now: datetime, redis_conn) -> list[dict]:
     """
     Calcula la tasa actual en bps para las interfaces basándose en el delta de bytes y tiempo.
     """
@@ -151,7 +151,7 @@ async def calculate_interface_rates(router_id: uuid.UUID, interface_samples: lis
 
     for sample in interface_samples:
         iface_name = sample["interface_name"]
-        cache_key = f"router:iface_bytes:{router_id}:{iface_name}"
+        cache_key = f"router:iface_bytes:{gateway_id}:{iface_name}"
 
         # Obtener muestra anterior de Redis
         prev_data_str = await redis_conn.get(cache_key)
@@ -211,7 +211,7 @@ def poll_traffic():
         ensure_partition_exists(db, now)
 
         # Cargar routers activos
-        routers = db.query(Router).filter(Router.activo == True).all()
+        routers = db.query(Gateway).filter(Gateway.activo == True).all()
         if not routers:
             logger.debug("No hay routers activos para monitorear.")
             return
@@ -221,14 +221,14 @@ def poll_traffic():
         # Cargar mapa de IPs estáticas de clientes activos para relacionar muestras
         # Filtramos clientes activos que tengan IP estática
         static_ips = (
-            db.query(StaticIP.router_id, StaticIP.ip, StaticIP.cliente_id)
+            db.query(StaticIP.gateway_id, StaticIP.ip, StaticIP.cliente_id)
             .join(Client, StaticIP.cliente_id == Client.id)
             .filter(Client.activo == True)
             .all()
         )
         static_ips_map = {
-            (router_id, ip): cliente_id 
-            for router_id, ip, cliente_id in static_ips
+            (gateway_id, ip): cliente_id 
+            for gateway_id, ip, cliente_id in static_ips
         }
 
         # Ejecutar recolección en paralelo usando subprocesos/hilos
@@ -280,7 +280,7 @@ def poll_traffic():
                     for cs in client_samples:
                         db_records.append(TrafficSample(
                             id=uuid.uuid4(),
-                            router_id=cs["router_id"],
+                            gateway_id=cs["gateway_id"],
                             cliente_id=cs["cliente_id"],
                             rx_bytes=cs["rx_bytes"],
                             tx_bytes=cs["tx_bytes"],
@@ -292,7 +292,7 @@ def poll_traffic():
                     for ifs in enriched_ifaces:
                         db_records.append(TrafficSample(
                             id=uuid.uuid4(),
-                            router_id=ifs["router_id"],
+                            gateway_id=ifs["gateway_id"],
                             interface_name=ifs["interface_name"],
                             rx_bytes=ifs["rx_bytes"],
                             tx_bytes=ifs["tx_bytes"],
@@ -303,7 +303,7 @@ def poll_traffic():
 
                     # Publicar actualización en vivo a Redis Pub/Sub por router
                     pub_payload = {
-                        "router_id": str(r.id),
+                        "gateway_id": str(r.id),
                         "timestamp": now.isoformat(),
                         "clients": [
                             {

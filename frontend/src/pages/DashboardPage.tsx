@@ -4,7 +4,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Server, Wifi, Users, Bell, Activity, UserCheck, UserX, UserMinus } from 'lucide-react'
 import api from '@/services/api'
-import { RouterStatusBadge } from '@/components/RouterStatusBadge'
+import { GatewayStatusBadge } from '@/components/GatewayStatusBadge'
 import { useAuthStore } from '@/stores/authStore'
 
 interface ClientStats {
@@ -20,7 +20,7 @@ export function DashboardPage() {
   const { data: routers = [] } = useQuery({
     queryKey: ['routers'],
     queryFn: async () => {
-      const { data } = await api.get('/routers')
+      const { data } = await api.get('/gateways')
       return data
     },
     refetchInterval: 30_000,
@@ -189,7 +189,7 @@ export function DashboardPage() {
                       </p>
                     </div>
                   </div>
-                  <RouterStatusBadge status={(router.status ?? 'unknown') as 'online' | 'offline' | 'degraded' | 'unknown'} />
+                  <GatewayStatusBadge status={(router.status ?? 'unknown') as 'online' | 'offline' | 'degraded' | 'unknown'} />
                 </div>
               ))}
             </div>

@@ -35,6 +35,10 @@ def run_migrations(bind_engine) -> None:
             conn.execute(text("ALTER TABLE routers ADD COLUMN IF NOT EXISTS ancho_banda_down INTEGER DEFAULT 0;"))
             conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS logo_url VARCHAR(255);"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS inactivity_timeout INTEGER DEFAULT 0;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS tipo_operador VARCHAR(50);"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS permisos_router VARCHAR(255);"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS horario_acceso VARCHAR(100);"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS permisos VARCHAR(500);"))
             conn.execute(text("""
             CREATE TABLE IF NOT EXISTS custom_services (
                 id VARCHAR(36) PRIMARY KEY,
@@ -94,7 +98,80 @@ def run_migrations(bind_engine) -> None:
             conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS auto_aplicar_pago BOOLEAN DEFAULT TRUE;"))
             conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS usar_credito_auto BOOLEAN DEFAULT TRUE;"))
             conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS prorrateo_separado BOOLEAN DEFAULT TRUE;"))
+            conn.execute(text("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS categoria VARCHAR(50);"))
+            conn.execute(text("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS modelo VARCHAR(80);"))
+
+            # ── Migración: Router → Gateway ────────────────────────────────────────
+            # Renombrar tabla principal (solo si aún existe como 'routers')
+            conn.execute(text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = 'routers'
+                ) THEN
+                    ALTER TABLE routers RENAME TO gateways;
+                END IF;
+            END $$;
+            """))
+            # Renombrar columna router_id → gateway_id en cada tabla relacionada
+            conn.execute(text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'clients' AND column_name = 'router_id'
+                ) THEN
+                    ALTER TABLE clients RENAME COLUMN router_id TO gateway_id;
+                END IF;
+            END $$;
+            """))
+            conn.execute(text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'pppoe_profiles' AND column_name = 'router_id'
+                ) THEN
+                    ALTER TABLE pppoe_profiles RENAME COLUMN router_id TO gateway_id;
+                END IF;
+            END $$;
+            """))
+            conn.execute(text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'pppoe_secrets' AND column_name = 'router_id'
+                ) THEN
+                    ALTER TABLE pppoe_secrets RENAME COLUMN router_id TO gateway_id;
+                END IF;
+            END $$;
+            """))
+            conn.execute(text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'static_ips' AND column_name = 'router_id'
+                ) THEN
+                    ALTER TABLE static_ips RENAME COLUMN router_id TO gateway_id;
+                END IF;
+            END $$;
+            """))
+            conn.execute(text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'traffic_samples' AND column_name = 'router_id'
+                ) THEN
+                    ALTER TABLE traffic_samples RENAME COLUMN router_id TO gateway_id;
+                END IF;
+            END $$;
+            """))
             conn.commit()
+
 
 
 

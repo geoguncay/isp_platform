@@ -29,15 +29,39 @@ export function PaymentRegisterDialog({
   const queryClient = useQueryClient()
   
   const [monto, setMonto] = useState<string>('')
-  const [metodo, setMetodo] = useState<'efectivo' | 'transferencia' | 'tarjeta' | 'deposito'>('efectivo')
+  const [metodo, setMetodo] = useState<string>('efectivo')
   const [notas, setNotas] = useState<string>('')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [methods, setMethods] = useState<{ value: string; label: string }[]>([])
 
   // Sincronizar monto por defecto cuando se abre con una factura
   useEffect(() => {
     if (invoice) {
       setMonto(invoice.monto.toString())
-      setMetodo('efectivo')
+      
+      const saved = localStorage.getItem('wisp_payment_methods')
+      let loadedMethods = [
+        { value: 'efectivo', label: 'Efectivo' },
+        { value: 'transferencia', label: 'Transferencia' },
+        { value: 'tarjeta', label: 'Tarjeta' },
+        { value: 'deposito', label: 'Depósito' }
+      ]
+      if (saved) {
+        try {
+          loadedMethods = JSON.parse(saved)
+        } catch (e) {
+          // ignore
+        }
+      } else {
+        localStorage.setItem('wisp_payment_methods', JSON.stringify(loadedMethods))
+      }
+      setMethods(loadedMethods)
+
+      if (loadedMethods.length > 0) {
+        setMetodo(loadedMethods[0].value)
+      } else {
+        setMetodo('efectivo')
+      }
       setNotas('')
       setErrorMsg(null)
     }
@@ -161,18 +185,18 @@ export function PaymentRegisterDialog({
               Método de Pago
             </label>
             <div className="grid grid-cols-2 gap-2">
-              {(['efectivo', 'transferencia', 'tarjeta', 'deposito'] as const).map((m) => (
+              {methods.map((m) => (
                 <button
-                  key={m}
+                  key={m.value}
                   type="button"
-                  onClick={() => setMetodo(m)}
-                  className={`px-3 py-2.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer capitalize text-center ${
-                    metodo === m
+                  onClick={() => setMetodo(m.value)}
+                  className={`px-3 py-2.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer text-center ${
+                    metodo === m.value
                       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                       : 'bg-secondary/40 text-muted-foreground border-border hover:bg-secondary/60 hover:text-foreground'
                   }`}
                 >
-                  {m === 'tarjeta' ? 'Tarjeta C/D' : m}
+                  {m.label}
                 </button>
               ))}
             </div>

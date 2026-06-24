@@ -4,8 +4,8 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { 
-  Receipt, Search, Filter, AlertTriangle, CheckCircle2, Clock, 
+import {
+  Receipt, Search, Filter, AlertTriangle, CheckCircle2, Clock,
   Download, PlusCircle, RefreshCw, CreditCard, User, AlertCircle
 } from 'lucide-react'
 import api from '@/services/api'
@@ -16,13 +16,13 @@ import { InvoiceCreateDialog } from '@/components/InvoiceCreateDialog'
 export function InvoicesPage() {
   const queryClient = useQueryClient()
   const { user } = useAuthStore()
-  
+
   // Filtros locales
   const [search, setSearch] = useState('')
   const [invoiceCreateOpen, setInvoiceCreateOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<'all' | 'pendiente' | 'vencido' | 'pagado'>('all')
   const [onlyOverdue, setOnlyOverdue] = useState(false)
-  
+
   // Estado para Diálogo de Cobro
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null)
   const [receiptLoadingMap, setReceiptLoadingMap] = useState<Record<string, boolean>>({})
@@ -46,13 +46,13 @@ export function InvoicesPage() {
   // Descargar Recibo PDF mediante Fetch de Blob
   const handleDownloadReceipt = async (pagoId: string) => {
     if (!pagoId) return
-    
+
     setReceiptLoadingMap(prev => ({ ...prev, [pagoId]: true }))
     try {
       const response = await api.get(`/payments/${pagoId}/receipt`, { responseType: 'blob' })
       const blob = new Blob([response.data], { type: 'application/pdf' })
       const url = window.URL.createObjectURL(blob)
-      
+
       const link = document.createElement('a')
       link.href = url
       link.setAttribute('download', `recibo_${pagoId.substring(0, 8).toUpperCase()}.pdf`)
@@ -92,9 +92,6 @@ export function InvoicesPage() {
             <Receipt className="w-7 h-7 text-primary" />
             <span>Gestión de Facturas y Cobranzas</span>
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Supervisa facturas emitidas, estados de cobro y emite recibos electrónicos de pago.
-          </p>
         </div>
 
         <div className="w-full sm:w-auto">
@@ -181,11 +178,10 @@ export function InvoicesPage() {
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer capitalize ${
-                  statusFilter === st
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer capitalize ${statusFilter === st
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
-                }`}
+                  }`}
               >
                 {st === 'all' ? 'Ver Todos' : st}
               </button>
@@ -264,13 +260,12 @@ export function InvoicesPage() {
                       {new Date(inv.fecha_vencimiento).toLocaleDateString()}
                     </td>
                     <td>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
-                        inv.estado === 'pagado'
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${inv.estado === 'pagado'
                           ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
                           : inv.estado === 'pendiente'
                             ? 'bg-amber-500/10 text-amber-400 border-amber-500/25'
                             : 'bg-rose-500/10 text-rose-400 border-rose-500/25'
-                      }`}>
+                        }`}>
                         {inv.estado.toUpperCase()}
                       </span>
                     </td>

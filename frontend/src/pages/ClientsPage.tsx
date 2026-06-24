@@ -6,13 +6,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, RefreshCw, Search, Users, Wifi, UserCheck, UserX, UserMinus,
-  ChevronRight, Trash2, Edit2, SlidersHorizontal, MapPin, ArrowUpDown, ChevronUp, ChevronDown, Calendar
+  ChevronRight, Trash2, Edit2, SlidersHorizontal, MapPin, ArrowUpDown, ChevronUp, ChevronDown, Calendar,
+  Upload
 } from 'lucide-react'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import api from '@/services/api'
 import { ClientFormDialog } from '@/components/ClientFormDialog'
+import { ClientImportDialog } from '@/components/ClientImportDialog'
 
 interface Client {
   id: string
@@ -22,7 +24,7 @@ interface Client {
   direccion: string
   latitud: number | null
   longitud: number | null
-  router_id: string
+  gateway_id: string
   tipo: 'static' | 'pppoe'
   activo: boolean
   plan_activo: { id: string; nombre: string; velocidad_down_mbps: number; velocidad_up_mbps: number; precio: number } | null
@@ -82,12 +84,13 @@ export function ClientsPage() {
   // Modales
   const [formOpen, setFormOpen] = useState(false)
   const [editingClient, setEditingClient] = useState<Client | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
 
   // Consultar Routers, Planes y Sitios para los dropdowns
   const { data: routers = [] } = useQuery<Router[]>({
     queryKey: ['routers-list-dropdown'],
     queryFn: async () => {
-      const { data } = await api.get('/routers')
+      const { data } = await api.get('/gateways')
       return data
     }
   })
@@ -119,7 +122,7 @@ export function ClientsPage() {
         sort_dir: sortDir,
       }
       if (search.trim()) params.search = search
-      if (routerId) params.router_id = routerId
+      if (routerId) params.gateway_id = routerId
       if (planId) params.plan_id = planId
       if (siteId) params.site_id = siteId
       if (activo) params.activo = activo === 'true'
@@ -193,6 +196,13 @@ export function ClientsPage() {
           >
             <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
             Actualizar
+          </button>
+          <button
+            onClick={() => setImportOpen(true)}
+            className="btn-secondary"
+          >
+            <Upload className="w-4 h-4" />
+            Importar
           </button>
           <button
             onClick={handleCreate}
@@ -640,7 +650,14 @@ export function ClientsPage() {
         }}
       />
 
-
+      {/* Dialog para Importación de Clientes */}
+      <ClientImportDialog
+        isOpen={importOpen}
+        onClose={() => setImportOpen(false)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['clients'] })
+        }}
+      />
     </div>
   )
 }

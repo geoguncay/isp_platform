@@ -2,8 +2,8 @@
 Servicio MikroTik para gestionar colas de ancho de banda (Simple Queues).
 """
 import logging
-from app.models.router import Router
-from app.services.mikrotik.router_pool import router_pool
+from app.models.gateway import Gateway
+from app.services.mikrotik.gateway_pool import router_pool
 from librouteros.query import Key
 
 logger = logging.getLogger(__name__)

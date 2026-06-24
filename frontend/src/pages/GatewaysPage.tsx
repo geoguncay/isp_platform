@@ -1,12 +1,12 @@
 /**
- * RoutersPage — Gestión de routers MikroTik con estado en tiempo real.
+ * GatewaysPage — Gestión de routers MikroTik con estado en tiempo real.
  */
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw, Wifi, Server, Clock, Download, X, Loader2, SlidersHorizontal } from 'lucide-react'
 import api from '@/services/api'
-import { RouterStatusBadge } from '@/components/RouterStatusBadge'
-import { RouterFormDialog } from '@/components/RouterFormDialog'
+import { GatewayStatusBadge } from '@/components/GatewayStatusBadge'
+import { GatewayFormDialog } from '@/components/GatewayFormDialog'
 import { useAuthStore } from '@/stores/authStore'
 import { useNavigate } from 'react-router-dom'
 import { formatUptime } from '@/lib/utils'
@@ -32,22 +32,22 @@ interface Router {
 }
 
 async function fetchRouters(): Promise<Router[]> {
-  const { data } = await api.get('/routers')
+  const { data } = await api.get('/gateways')
   return data
 }
 
 async function deleteRouter(id: string): Promise<void> {
-  await api.delete(`/routers/${id}`)
+  await api.delete(`/gateways/${id}`)
 }
 
-export function RoutersPage() {
+export function GatewaysPage() {
   const { user } = useAuthStore()
   const queryClient = useQueryClient()
   const isAdmin = user?.rol === 'admin'
   const navigate = useNavigate()
 
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingRouter, setEditingRouter] = useState<Router | null>(null)
+  const [editingGateway, setEditingGateway] = useState<Router | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
   // Address-list client import states
@@ -59,7 +59,7 @@ export function RoutersPage() {
   const { data: addressLists = [], isLoading: isLoadingLists } = useQuery<string[]>({
     queryKey: ['address-lists', importingRouter?.id],
     queryFn: async () => {
-      const { data } = await api.get(`/routers/${importingRouter?.id}/address-lists`)
+      const { data } = await api.get(`/gateways/${importingRouter?.id}/address-lists`)
       return data
     },
     enabled: !!importingRouter,
@@ -81,7 +81,7 @@ export function RoutersPage() {
 
   const importMutation = useMutation({
     mutationFn: async (payload: { routerId: string; listName: string }) => {
-      const { data } = await api.post(`/routers/${payload.routerId}/import-clients`, null, {
+      const { data } = await api.post(`/gateways/${payload.routerId}/import-clients`, null, {
         params: { list_name: payload.listName }
       })
       return data as { imported_count: number }
@@ -157,7 +157,7 @@ export function RoutersPage() {
           {isAdmin && (
             <button
               id="add-router"
-              onClick={() => { setEditingRouter(null); setDialogOpen(true) }}
+              onClick={() => { setEditingGateway(null); setDialogOpen(true) }}
               className="btn-primary"
             >
               <Plus className="w-4 h-4" />
@@ -250,7 +250,7 @@ export function RoutersPage() {
                   {filteredRouters.map((router) => (
                     <tr
                       key={router.id}
-                      onClick={() => navigate(`/routers/${router.id}`)}
+                      onClick={() => navigate(`/gateways/${router.id}`)}
                       className="group cursor-pointer hover:bg-secondary/40 transition-colors"
                     >
                       <td>
@@ -281,7 +281,7 @@ export function RoutersPage() {
                         </code>
                       </td>
                       <td>
-                        <RouterStatusBadge status={router.status ?? 'unknown'} />
+                        <GatewayStatusBadge status={router.status ?? 'unknown'} />
                       </td>
                       <td className="hidden lg:table-cell">
                         <span className="text-xs text-muted-foreground font-mono">
@@ -331,14 +331,14 @@ export function RoutersPage() {
       )}
 
       {/* ── Dialog crear/editar ── */}
-      <RouterFormDialog
+      <GatewayFormDialog
         open={dialogOpen}
-        onClose={() => { setDialogOpen(false); setEditingRouter(null) }}
-        router={editingRouter}
+        onClose={() => { setDialogOpen(false); setEditingGateway(null) }}
+        gateway={editingGateway}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ['routers'] })
           setDialogOpen(false)
-          setEditingRouter(null)
+          setEditingGateway(null)
         }}
         onDelete={(id) => setConfirmDelete(id)}
       />

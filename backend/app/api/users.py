@@ -57,6 +57,10 @@ def create_user(payload: UserCreate, db: DBSession, _: AdminOnly) -> User:
         hashed_password=hash_password(payload.password),
         rol=payload.rol,
         activo=payload.activo,
+        tipo_operador=payload.tipo_operador,
+        permisos_router=payload.permisos_router,
+        horario_acceso=payload.horario_acceso,
+        permisos=payload.permisos,
     )
     db.add(user)
     try:

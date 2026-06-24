@@ -1,5 +1,5 @@
 /**
- * RouterProfilePage — Ficha del router, listado de clientes asociados, ubicación geográfica y configuración de MikroTik.
+ * GatewayProfilePage — Ficha del router, listado de clientes asociados, ubicación geográfica y configuración de MikroTik.
  */
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -13,8 +13,8 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import api from '@/services/api'
-import { RouterStatusBadge } from '@/components/RouterStatusBadge'
-import { RouterFormDialog } from '@/components/RouterFormDialog'
+import { GatewayStatusBadge } from '@/components/GatewayStatusBadge'
+import { GatewayFormDialog } from '@/components/GatewayFormDialog'
 import { useAuthStore } from '@/stores/authStore'
 import { formatUptime } from '@/lib/utils'
 import TrafficChart, { formatSpeed } from '@/components/TrafficChart'
@@ -217,7 +217,7 @@ function DonutChart({
   )
 }
 
-export function RouterProfilePage() {
+export function GatewayProfilePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -291,7 +291,7 @@ export function RouterProfilePage() {
   const { data: router, isLoading: isLoadingRouter, isError: isErrorRouter, refetch: refetchRouter } = useQuery({
     queryKey: ['router', id],
     queryFn: async () => {
-      const { data } = await api.get(`/routers/${id}`)
+      const { data } = await api.get(`/gateways/${id}`)
       return data
     }
   })
@@ -303,7 +303,7 @@ export function RouterProfilePage() {
     queryKey: ['router-clients-all', id],
     queryFn: async () => {
       const { data } = await api.get(`/clients`, {
-        params: { router_id: id, limit: 1000 }
+        params: { gateway_id: id, limit: 1000 }
       })
       return data.items || []
     }
@@ -317,7 +317,7 @@ export function RouterProfilePage() {
     queryKey: ['router-clients-paginated', id, clientsPage, searchTerm],
     queryFn: async () => {
       const params: any = {
-        router_id: id,
+        gateway_id: id,
         skip: (clientsPage - 1) * clientsLimit,
         limit: clientsLimit
       }
@@ -333,7 +333,7 @@ export function RouterProfilePage() {
   const { data: addressLists = [], isLoading: isLoadingLists } = useQuery<string[]>({
     queryKey: ['address-lists', id],
     queryFn: async () => {
-      const { data } = await api.get(`/routers/${id}/address-lists`)
+      const { data } = await api.get(`/gateways/${id}/address-lists`)
       return data
     },
     enabled: importingOpen,
@@ -343,7 +343,7 @@ export function RouterProfilePage() {
   const { data: queues = [], isLoading: isLoadingQueues, refetch: refetchQueues } = useQuery({
     queryKey: ['router-queues', id],
     queryFn: async () => {
-      const { data } = await api.get(`/routers/${id}/queues`)
+      const { data } = await api.get(`/gateways/${id}/queues`)
       return data
     }
   })
@@ -396,7 +396,7 @@ export function RouterProfilePage() {
     setIsTesting(true)
     setTestResult(null)
     try {
-      const { data } = await api.post(`/routers/${id}/test-connection`)
+      const { data } = await api.post(`/gateways/${id}/test-connection`)
       setTestResult(data)
       refetchRouter()
     } catch (err: any) {
@@ -410,7 +410,7 @@ export function RouterProfilePage() {
   // Mutación para importar clientes de address-list
   const importMutation = useMutation({
     mutationFn: async (listName: string) => {
-      const { data } = await api.post(`/routers/${id}/import-clients`, null, {
+      const { data } = await api.post(`/gateways/${id}/import-clients`, null, {
         params: { list_name: listName }
       })
       return data
@@ -444,11 +444,11 @@ export function RouterProfilePage() {
   // Mutación para eliminar router
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      await api.delete(`/routers/${id}`)
+      await api.delete(`/gateways/${id}`)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['routers'] })
-      navigate('/routers')
+      navigate('/gateways')
     },
     onError: (err: any) => {
       const msg = err?.response?.data?.detail || 'Error al eliminar el router'
@@ -460,7 +460,7 @@ export function RouterProfilePage() {
   const { data: pppoeSessions = [], isLoading: isLoadingSessions, refetch: refetchSessions } = useQuery<any[]>({
     queryKey: ['router-pppoe-sessions', id],
     queryFn: async () => {
-      const { data } = await api.get(`/routers/${id}/pppoe-sessions`)
+      const { data } = await api.get(`/gateways/${id}/pppoe-sessions`)
       return data
     },
     enabled: activeTab === 'pppoe',
@@ -470,7 +470,7 @@ export function RouterProfilePage() {
   // Mutación para desconectar sesión activa
   const disconnectSessionMutation = useMutation({
     mutationFn: async (username: string) => {
-      await api.delete(`/routers/${id}/pppoe-sessions/${username}`)
+      await api.delete(`/gateways/${id}/pppoe-sessions/${username}`)
     },
     onSuccess: () => {
       refetchSessions()
@@ -484,7 +484,7 @@ export function RouterProfilePage() {
   // Mutación para sincronizar perfiles PPPoE
   const syncProfilesMutation = useMutation({
     mutationFn: async () => {
-      await api.post(`/routers/${id}/sync-pppoe-profiles`)
+      await api.post(`/gateways/${id}/sync-pppoe-profiles`)
     },
     onSuccess: () => {
       refetchRouter()
@@ -525,7 +525,7 @@ export function RouterProfilePage() {
         <p className="text-muted-foreground text-sm mb-6">
           El router solicitado no existe o ha sido desactivado permanentemente.
         </p>
-        <button onClick={() => navigate('/routers')} className="btn-secondary mx-auto">
+        <button onClick={() => navigate('/gateways')} className="btn-secondary mx-auto">
           <ArrowLeft className="w-4 h-4" />
           Volver a Routers
         </button>
@@ -596,7 +596,7 @@ export function RouterProfilePage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate('/routers')}
+            onClick={() => navigate('/gateways')}
             className="w-10 h-10 rounded-lg bg-secondary/50 border border-border flex items-center justify-center hover:bg-secondary transition-colors"
           >
             <ArrowLeft className="w-5 h-5 text-foreground" />
@@ -604,7 +604,7 @@ export function RouterProfilePage() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-foreground">{router.nombre}</h1>
-              <RouterStatusBadge status={router.status ?? 'unknown'} />
+              <GatewayStatusBadge status={router.status ?? 'unknown'} />
             </div>
             <p className="text-xs text-muted-foreground mt-0.5 font-mono">
               ID: {router.id} {router.modelo_hw ? `· HW: ${router.modelo_hw}` : ''}
@@ -1390,10 +1390,10 @@ export function RouterProfilePage() {
 
       {/* ── Dialog Crear/Editar Router ── */}
       {editOpen && (
-        <RouterFormDialog
+        <GatewayFormDialog
           open={editOpen}
           onClose={() => setEditOpen(false)}
-          router={router}
+          gateway={router}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['router', id] })
             queryClient.invalidateQueries({ queryKey: ['routers'] })

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 class PaymentCreate(BaseModel):
     invoice_id: uuid.UUID
     monto: float = Field(gt=0)
-    metodo: str = Field(pattern="^(efectivo|transferencia|tarjeta|deposito)$")
+    metodo: str = Field(min_length=1, max_length=50)
     notas: str | None = Field(default=None, max_length=255)
 
 

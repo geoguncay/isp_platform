@@ -10,17 +10,20 @@ import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AppLayout } from '@/components/AppLayout'
 import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
-import { RoutersPage } from '@/pages/RoutersPage'
+import { GatewaysPage } from '@/pages/GatewaysPage'
 import { ProfilePage } from '@/pages/ProfilePage'
 import { ClientsPage } from '@/pages/ClientsPage'
 import { ClientProfilePage } from '@/pages/ClientProfilePage'
 import { PlansPage } from '@/pages/PlansPage'
-import { RouterProfilePage } from '@/pages/RouterProfilePage'
+import { GatewayProfilePage } from '@/pages/GatewayProfilePage'
 import { TrafficPage } from '@/pages/TrafficPage'
 import { CustomServicesPage } from '@/pages/CustomServicesPage'
 import { SubscribersStatsPage } from '@/pages/SubscribersStatsPage'
 import { InvoicesPage } from '@/pages/InvoicesPage'
 import { PaymentsPage } from '@/pages/PaymentsPage'
+import { InventoryPage } from '@/pages/InventoryPage'
+import { ProvidersPage } from '@/pages/ProvidersPage'
+import { SettingsPage } from '@/pages/SettingsPage'
 
 
 
@@ -52,8 +55,8 @@ function AppContent() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/routers" element={<RoutersPage />} />
-          <Route path="/routers/:id" element={<RouterProfilePage />} />
+          <Route path="/gateways" element={<GatewaysPage />} />
+          <Route path="/gateways/:id" element={<GatewayProfilePage />} />
           <Route path="/traffic" element={<TrafficPage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/clients/:id" element={<ClientProfilePage />} />
@@ -62,7 +65,10 @@ function AppContent() {
           <Route path="/custom-services" element={<CustomServicesPage />} />
           <Route path="/invoices" element={<InvoicesPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/providers" element={<ProvidersPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/settings" element={<SettingsPage />} />
 
         </Route>
       </Route>

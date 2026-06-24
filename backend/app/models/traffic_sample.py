@@ -16,8 +16,8 @@ class TrafficSample(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(native_uuid=False), default=uuid.uuid4, nullable=False
     )
-    router_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(native_uuid=False), ForeignKey("routers.id", ondelete="CASCADE"), nullable=False, index=True
+    gateway_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(native_uuid=False), ForeignKey("gateways.id", ondelete="CASCADE"), nullable=False, index=True
     )
     cliente_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(native_uuid=False), ForeignKey("clients.id", ondelete="CASCADE"), nullable=True, index=True
@@ -43,7 +43,7 @@ class TrafficSample(Base):
     )
 
     # Relaciones
-    router = relationship("Router")
+    gateway = relationship("Gateway")
     client = relationship("Client")
 
     def __repr__(self) -> str:

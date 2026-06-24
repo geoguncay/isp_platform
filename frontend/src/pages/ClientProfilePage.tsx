@@ -121,15 +121,15 @@ export function ClientProfilePage() {
     }
   })
 
-  // Consultar Estado de Sesión PPPoE (solo si es PPPoE y el router_id está disponible)
+  // Consultar Estado de Sesión PPPoE (solo si es PPPoE y el gateway_id está disponible)
   const { data: pppoeSessions = [], refetch: refetchSessions } = useQuery<any[]>({
-    queryKey: ['router-pppoe-sessions', client?.router_id],
+    queryKey: ['router-pppoe-sessions', client?.gateway_id],
     queryFn: async () => {
-      if (!client?.router_id) return []
-      const { data } = await api.get(`/routers/${client.router_id}/pppoe-sessions`)
+      if (!client?.gateway_id) return []
+      const { data } = await api.get(`/gateways/${client.gateway_id}/pppoe-sessions`)
       return data
     },
-    enabled: !!client && client.tipo === 'pppoe' && !!client.router_id,
+    enabled: !!client && client.tipo === 'pppoe' && !!client.gateway_id,
     refetchInterval: 10000, // Refrescar cada 10 s
   })
 
@@ -141,8 +141,8 @@ export function ClientProfilePage() {
   // Mutación para desconectar sesión activa
   const disconnectSessionMutation = useMutation({
     mutationFn: async () => {
-      if (!client?.router_id || !client?.pppoe_secret?.usuario_ppp) return
-      await api.delete(`/routers/${client.router_id}/pppoe-sessions/${client.pppoe_secret.usuario_ppp}`)
+      if (!client?.gateway_id || !client?.pppoe_secret?.usuario_ppp) return
+      await api.delete(`/gateways/${client.gateway_id}/pppoe-sessions/${client.pppoe_secret.usuario_ppp}`)
     },
     onSuccess: () => {
       refetchSessions()
@@ -205,7 +205,7 @@ export function ClientProfilePage() {
   })
 
   useEffect(() => {
-    if (trafficRange !== 'live' || !client?.router_id) return
+    if (trafficRange !== 'live' || !client?.gateway_id) return
 
     const wsUrl = (() => {
       const token = localStorage.getItem('access_token') || ''
@@ -219,7 +219,7 @@ export function ClientProfilePage() {
           wsHost = url.host
         } catch {}
       }
-      return `${wsProtocol}//${wsHost}/api/traffic/ws/${client.router_id}?token=${token}`
+      return `${wsProtocol}//${wsHost}/api/traffic/ws/${client.gateway_id}?token=${token}`
     })()
 
     const ws = new WebSocket(wsUrl)
@@ -248,7 +248,7 @@ export function ClientProfilePage() {
     return () => {
       ws.close()
     }
-  }, [id, client?.router_id, trafficRange])
+  }, [id, client?.gateway_id, trafficRange])
 
   // Mutación para Registrar Ticket
   const createTicketMutation = useMutation({

@@ -3,7 +3,8 @@
  */
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Users, UserCheck, UserMinus, UserX, RefreshCw, BarChart2, PieChart, Activity, ShieldAlert, TrendingUp } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Users, UserCheck, UserMinus, UserX, RefreshCw, BarChart2, PieChart, Activity, ShieldAlert, TrendingUp, ArrowRight } from 'lucide-react'
 import { PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import api from '@/services/api'
 
@@ -29,6 +30,7 @@ interface ClientsResponse {
 }
 
 export function SubscribersStatsPage() {
+  const navigate = useNavigate()
   const [subscribersViewMode, setSubscribersViewMode] = useState<'status' | 'growth'>('status')
 
   // Query 1: Obtener estadísticas simplificadas de clientes
@@ -106,7 +108,7 @@ export function SubscribersStatsPage() {
       try {
         const date = new Date(c.created_at)
         if (isNaN(date.getTime())) return
-        
+
         // Formato: AAAA-MM
         const year = date.getFullYear()
         const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -145,9 +147,6 @@ export function SubscribersStatsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Estadísticas de Suscriptores</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
-            Métricas de conexión, distribución de planes y tipos de enlace activos.
-          </p>
         </div>
         <button
           onClick={handleRefresh}
@@ -170,6 +169,24 @@ export function SubscribersStatsPage() {
           </p>
           <button onClick={handleRefresh} className="btn-primary mx-auto">
             Reintentar
+          </button>
+        </div>
+      ) : (!isLoading && !clientsLoading && clientStats?.total === 0) ? (
+        <div className="glass-card p-12 text-center max-w-xl mx-auto space-y-5 animate-fade-in border border-border/40">
+          <div className="w-16 h-16 bg-brand-500/10 rounded-full flex items-center justify-center mx-auto border border-brand-500/20">
+            <Users className="w-8 h-8 text-brand-400" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-lg font-bold text-foreground">No hay estadísticas disponibles</h3>
+            <p className="text-muted-foreground text-sm max-w-sm mx-auto">
+              Aún no hay clientes registrados en la plataforma. Registra tus suscriptores de forma manual o impórtalos para ver métricas de conexión y gráficos.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate('/clients')}
+            className="btn-primary flex items-center gap-1.5 mx-auto cursor-pointer"
+          >
+            Registrar o Importar Clientes <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       ) : (
@@ -242,21 +259,19 @@ export function SubscribersStatsPage() {
                 <div className="flex bg-secondary/50 rounded-lg p-0.5 border border-border/60">
                   <button
                     onClick={() => setSubscribersViewMode('status')}
-                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all duration-200 ${
-                      subscribersViewMode === 'status'
+                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all duration-200 ${subscribersViewMode === 'status'
                         ? 'bg-brand-500 text-white shadow-sm'
                         : 'text-muted-foreground hover:text-foreground'
-                    }`}
+                      }`}
                   >
                     Distribución
                   </button>
                   <button
                     onClick={() => setSubscribersViewMode('growth')}
-                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all duration-200 ${
-                      subscribersViewMode === 'growth'
+                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all duration-200 ${subscribersViewMode === 'growth'
                         ? 'bg-brand-500 text-white shadow-sm'
                         : 'text-muted-foreground hover:text-foreground'
-                    }`}
+                      }`}
                   >
                     Crecimiento
                   </button>
@@ -444,7 +459,7 @@ export function SubscribersStatsPage() {
                 <Activity className="w-4 h-4 text-brand-400" />
                 <h2 className="text-sm font-semibold text-foreground">Métodos de Conexión</h2>
               </div>
-              
+
               {isLoading ? (
                 <div className="flex items-center justify-center h-24">
                   <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />

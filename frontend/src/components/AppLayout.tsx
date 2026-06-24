@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import {
   Wifi, LayoutDashboard, Router, Users,
   LogOut, Menu, X, ChevronDown, ChevronRight, Activity, Settings, Network,
-  Zap, Building, Sliders, BarChart2, Receipt, DollarSign,
+  Zap, Building, Sliders, BarChart2, Receipt, DollarSign, Package, Truck,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import api from '@/services/api'
@@ -34,7 +34,7 @@ const navItems: NavItem[] = [
     icon: Network,
     roles: ['admin', 'tecnico'],
     items: [
-      { to: '/routers', icon: Router, label: 'Routers' },
+      { to: '/gateways', icon: Router, label: 'Gateways' },
       { to: '/traffic', icon: Activity, label: 'Tráfico' },
     ]
   },
@@ -62,8 +62,23 @@ const navItems: NavItem[] = [
     roles: ['admin', 'tecnico'],
     items: [
       { to: '/invoices', icon: Receipt, label: 'Facturas' },
-      { to: '/payments', icon: DollarSign, label: 'Caja y Cobros' },
+      { to: '/payments', icon: DollarSign, label: 'Pagos' },
     ]
+  },
+  {
+    label: 'Inventario',
+    icon: Package,
+    roles: ['admin', 'tecnico'],
+    items: [
+      { to: '/inventory', icon: Package, label: 'Stock' },
+      { to: '/providers', icon: Truck, label: 'Proveedores' },
+    ]
+  },
+  {
+    to: '/settings',
+    icon: Settings,
+    label: 'Ajustes',
+    roles: ['admin']
   },
 ]
 
@@ -82,7 +97,7 @@ export function AppLayout() {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [networkMenuOpen, setNetworkMenuOpen] = useState(
-    location.pathname.startsWith('/routers') || location.pathname.startsWith('/traffic')
+    location.pathname.startsWith('/gateways') || location.pathname.startsWith('/traffic')
   )
   const [subscribersMenuOpen, setSubscribersMenuOpen] = useState(
     location.pathname.startsWith('/clients') || location.pathname.startsWith('/subscribers')
@@ -93,9 +108,12 @@ export function AppLayout() {
   const [billingMenuOpen, setBillingMenuOpen] = useState(
     location.pathname.startsWith('/invoices') || location.pathname.startsWith('/payments')
   )
+  const [inventoryMenuOpen, setInventoryMenuOpen] = useState(
+    location.pathname.startsWith('/inventory') || location.pathname.startsWith('/providers')
+  )
 
   useEffect(() => {
-    if (location.pathname.startsWith('/routers') || location.pathname.startsWith('/traffic')) {
+    if (location.pathname.startsWith('/gateways') || location.pathname.startsWith('/traffic')) {
       setNetworkMenuOpen(true)
     }
     if (location.pathname.startsWith('/clients') || location.pathname.startsWith('/subscribers')) {
@@ -106,6 +124,9 @@ export function AppLayout() {
     }
     if (location.pathname.startsWith('/invoices') || location.pathname.startsWith('/payments')) {
       setBillingMenuOpen(true)
+    }
+    if (location.pathname.startsWith('/inventory') || location.pathname.startsWith('/providers')) {
+      setInventoryMenuOpen(true)
     }
   }, [location.pathname])
 
@@ -216,7 +237,9 @@ export function AppLayout() {
                 ? subscribersMenuOpen
                 : item.label === 'Servicios'
                 ? servicesMenuOpen
-                : billingMenuOpen
+                : item.label === 'Facturación'
+                ? billingMenuOpen
+                : inventoryMenuOpen
             const toggleMenu = () => {
               if (item.label === 'Dispositivos') {
                 setNetworkMenuOpen(!networkMenuOpen)
@@ -226,6 +249,8 @@ export function AppLayout() {
                 setServicesMenuOpen(!servicesMenuOpen)
               } else if (item.label === 'Facturación') {
                 setBillingMenuOpen(!billingMenuOpen)
+              } else if (item.label === 'Inventario') {
+                setInventoryMenuOpen(!inventoryMenuOpen)
               }
             }
             const Icon = item.icon

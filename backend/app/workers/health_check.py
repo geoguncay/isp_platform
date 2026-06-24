@@ -5,7 +5,7 @@ import asyncio
 import logging
 
 from app.core.database import SessionLocal
-from app.models.router import Router
+from app.models.gateway import Gateway
 from app.services.mikrotik.health import check_router_health
 from app.workers.celery_app import celery_app
 
@@ -20,7 +20,7 @@ def check_all_routers(self):
     """
     db = SessionLocal()
     try:
-        routers = db.query(Router).filter(Router.activo == True).all()
+        routers = db.query(Gateway).filter(Router.activo == True).all()
         logger.info(f"Health check: revisando {len(routers)} routers activos")
 
         async def _run_checks():

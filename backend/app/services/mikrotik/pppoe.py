@@ -5,10 +5,10 @@ import logging
 from sqlalchemy.orm import Session
 from librouteros.query import Key
 
-from app.models.router import Router
+from app.models.gateway import Gateway
 from app.models.pppoe_profile import PPPoEProfile
 from app.models.plan import Plan
-from app.services.mikrotik.router_pool import router_pool
+from app.services.mikrotik.gateway_pool import router_pool
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ def sync_pppoe_profiles_from_router(db: Session, router: Router) -> int:
             
             # Buscar o crear perfil en BD
             profile = db.query(PPPoEProfile).filter(
-                PPPoEProfile.router_id == router.id,
+                PPPoEProfile.gateway_id == router.id,
                 PPPoEProfile.nombre == profile_name
             ).first()
             
@@ -131,7 +131,7 @@ def sync_pppoe_profiles_from_router(db: Session, router: Router) -> int:
                     nombre=profile_name,
                     velocidad_down_mbps=plan.velocidad_down_mbps,
                     velocidad_up_mbps=plan.velocidad_up_mbps,
-                    router_id=router.id
+                    gateway_id=router.id
                 )
                 db.add(profile)
             
@@ -140,7 +140,7 @@ def sync_pppoe_profiles_from_router(db: Session, router: Router) -> int:
         # Limpiar perfiles locales que ya no corresponden a ningún plan activo
         if active_names:
             db.query(PPPoEProfile).filter(
-                PPPoEProfile.router_id == router.id,
+                PPPoEProfile.gateway_id == router.id,
                 ~PPPoEProfile.nombre.in_(active_names)
             ).delete(synchronize_session=False)
             

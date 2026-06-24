@@ -55,19 +55,46 @@ interface FormCustomService {
   activo: boolean
 }
 
+const splitClientName = (fullName: string) => {
+  const trimmed = (fullName || '').trim()
+  if (trimmed.includes(',')) {
+    const parts = trimmed.split(',')
+    return {
+      apellidos: parts[0].trim(),
+      nombres: parts.slice(1).join(',').trim()
+    }
+  }
+  const words = trimmed.split(/\s+/)
+  if (words.length <= 1) {
+    return { apellidos: '', nombres: trimmed }
+  } else if (words.length === 2) {
+    return { apellidos: words[1], nombres: words[0] }
+  } else if (words.length === 3) {
+    return { apellidos: words.slice(1).join(' '), nombres: words[0] }
+  } else {
+    const middle = Math.ceil(words.length / 2)
+    return {
+      nombres: words.slice(0, middle).join(' '),
+      apellidos: words.slice(middle).join(' ')
+    }
+  }
+}
+
 // Centrado por defecto en Quito, Ecuador
 const DEFAULT_CENTER: [number, number] = [-0.180653, -78.467834]
 
 const clientSchema = z.object({
   id: z.string().optional(),
-  nombre: z.string().min(2, 'Mínimo 2 caracteres').max(120),
+  apellidos: z.string().min(2, 'Mínimo 2 caracteres').max(60),
+  nombres: z.string().min(2, 'Mínimo 2 caracteres').max(60),
+  nombre: z.string().optional(),
   tipo_documento: z.enum(['cedula', 'ruc']),
   cedula: z.string(),
   telefono: z.string().min(5, 'Mínimo 5 caracteres').max(40),
   direccion: z.string().min(5, 'Mínimo 5 caracteres').max(255),
   latitud: z.coerce.number().optional().nullable(),
   longitud: z.coerce.number().optional().nullable(),
-  router_id: z.string().min(1, 'Debe seleccionar un router'),
+  gateway_id: z.string().min(1, 'Debe seleccionar un router'),
   tipo: z.enum(['static', 'pppoe']),
   plan_id: z.string().optional().nullable(),
   custom_service_ids: z.array(z.string()).optional(),
@@ -183,7 +210,7 @@ interface FormClient {
   email?: string | null
   activo: boolean
   tipo: 'static' | 'pppoe'
-  router_id: string
+  gateway_id: string
   latitud?: number | null
   longitud?: number | null
   created_at?: string | null
@@ -219,6 +246,27 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
   const isEdit = !!client
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
+  const [methods, setMethods] = useState<{ value: string; label: string }[]>([])
+
+  useEffect(() => {
+    if (open) {
+      const saved = localStorage.getItem('wisp_payment_methods')
+      let loadedMethods = [
+        { value: 'efectivo', label: 'Efectivo' },
+        { value: 'transferencia', label: 'Transferencia' },
+        { value: 'tarjeta', label: 'Tarjeta' },
+        { value: 'deposito', label: 'Depósito' }
+      ]
+      if (saved) {
+        try {
+          loadedMethods = JSON.parse(saved)
+        } catch (e) {
+          // ignore
+        }
+      }
+      setMethods(loadedMethods)
+    }
+  }, [open])
 
   const {
     register,
@@ -240,7 +288,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
   const { data: routers = [] } = useQuery<FormRouter[]>({
     queryKey: ['routers-form'],
     queryFn: async () => {
-      const { data } = await api.get('/routers')
+      const { data } = await api.get('/gateways')
       return data
     },
     enabled: open,
@@ -266,7 +314,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
     enabled: open,
   })
 
-  const selectedRouterId = watch('router_id')
+  const selectedRouterId = watch('gateway_id')
   const selectedPlanId = watch('plan_id')
   const selectedCustomServiceIds = watch('custom_service_ids') || []
 
@@ -372,7 +420,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
     if (isProrated) {
       if (prorrateoSeparado) {
         const firstMonto = proratedPlanPrice + proratedRecurringServicesPrice + oneTimeCustomServicesPrice
-        
+
         let creationDate: Date
         if (tipoFacturacion === 'forward') {
           creationDate = D_start
@@ -392,7 +440,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
         }
 
         const nextMonto = planPrice + recurringCustomServicesPrice
-        
+
         let nextCreationDate: Date
         if (tipoFacturacion === 'forward') {
           nextCreationDate = periodNextStart
@@ -447,7 +495,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
         }
 
         const nextMonto = planPrice + recurringCustomServicesPrice
-        
+
         let nextCreationDate: Date
         if (tipoFacturacion === 'forward') {
           nextCreationDate = periodNextNextStart
@@ -477,7 +525,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
       }
     } else {
       const firstMonto = planPrice + recurringCustomServicesPrice + oneTimeCustomServicesPrice
-      
+
       let creationDate: Date
       if (tipoFacturacion === 'forward') {
         creationDate = D_start
@@ -558,8 +606,11 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
       const todayStr = `${yyyy}-${mm}-${dd}`
 
       if (client) {
+        const nameParts = splitClientName(client.nombre)
         reset({
           id: client.id,
+          apellidos: nameParts.apellidos,
+          nombres: nameParts.nombres,
           nombre: client.nombre,
           tipo_documento: client.cedula?.length === 13 ? 'ruc' : 'cedula',
           cedula: client.cedula,
@@ -567,7 +618,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           direccion: client.direccion,
           latitud: client.latitud,
           longitud: client.longitud,
-          router_id: client.router_id,
+          gateway_id: client.gateway_id,
           tipo: client.tipo,
           plan_id: client.plan_activo?.id ?? '',
           activo: client.activo,
@@ -579,8 +630,8 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           perfil_id: client.pppoe_secret?.perfil_id ?? '',
           email: client.email ?? '',
           created_at: client.created_at ? client.created_at.split('T')[0] : todayStr,
-          inicio_facturacion: client.inicio_facturacion 
-            ? client.inicio_facturacion.split('T')[0] 
+          inicio_facturacion: client.inicio_facturacion
+            ? client.inicio_facturacion.split('T')[0]
             : (client.created_at ? client.created_at.split('T')[0] : todayStr),
           dia_inicio_periodo: client.dia_inicio_periodo ?? 1,
           crear_factura_anticipo_dias: client.crear_factura_anticipo_dias ?? 0,
@@ -598,6 +649,8 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
       } else {
         reset({
           id: undefined,
+          apellidos: '',
+          nombres: '',
           nombre: '',
           tipo_documento: 'cedula',
           cedula: '',
@@ -605,7 +658,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           direccion: '',
           latitud: null,
           longitud: null,
-          router_id: '',
+          gateway_id: '',
           tipo: 'static',
           plan_id: '',
           activo: true,
@@ -639,6 +692,9 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
   const saveMutation = useMutation({
     mutationFn: async (data: ClientFormData) => {
       const payload = { ...data } as any
+      payload.nombre = `${payload.apellidos || ''} ${payload.nombres || ''}`.trim()
+      delete payload.apellidos
+      delete payload.nombres
       if (!payload.custom_service_ids) {
         payload.custom_service_ids = []
       }
@@ -648,7 +704,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
       delete payload.notif_email
       delete payload.notif_sms
       delete payload.notif_whatsapp
-      
+
       if (!payload.plan_id) delete payload.plan_id
       if (payload.latitud === 0 || isNaN(Number(payload.latitud))) payload.latitud = null
       if (payload.longitud === 0 || isNaN(Number(payload.longitud))) payload.longitud = null
@@ -725,31 +781,31 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
 
   const onFormError = (errors: Record<string, unknown>) => {
     const errorKeys = Object.keys(errors)
-    
-    const step1Fields = ['nombre', 'tipo_documento', 'cedula', 'telefono', 'direccion', 'email', 'created_at', 'latitud', 'longitud']
+
+    const step1Fields = ['apellidos', 'nombres', 'tipo_documento', 'cedula', 'telefono', 'direccion', 'email', 'created_at', 'latitud', 'longitud']
     if (errorKeys.some((key) => step1Fields.includes(key))) {
       setStep(1)
       return
     }
-    
+
     const step2Fields = ['dia_pago', 'metodo_pago', 'plan_id']
     if (errorKeys.some((key) => step2Fields.includes(key))) {
       setStep(2)
       return
     }
-    
+
     const step3Fields = ['custom_service_ids']
     if (errorKeys.some((key) => step3Fields.includes(key))) {
       setStep(3)
       return
     }
-    
-    const step4Fields = ['router_id', 'tipo', 'ip', 'mac', 'notas_ip', 'usuario_ppp', 'contraseña_ppp', 'perfil_id']
+
+    const step4Fields = ['gateway_id', 'tipo', 'ip', 'mac', 'notas_ip', 'usuario_ppp', 'contraseña_ppp', 'perfil_id']
     if (errorKeys.some((key) => step4Fields.includes(key))) {
       setStep(4)
       return
     }
-    
+
     const step5Fields = ['notif_email', 'notif_sms', 'notif_whatsapp']
     if (errorKeys.some((key) => step5Fields.includes(key))) {
       setStep(5)
@@ -783,8 +839,8 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           <div className="flex items-center w-full max-w-4xl mx-auto justify-between relative">
             {/* Línea de fondo */}
             <div className="absolute top-5 left-0 right-0 h-0.5 bg-border -translate-y-1/2 z-0" />
-            <div 
-              className="absolute top-5 left-0 h-0.5 bg-brand-500 transition-all duration-300 -translate-y-1/2 z-0" 
+            <div
+              className="absolute top-5 left-0 h-0.5 bg-brand-500 transition-all duration-300 -translate-y-1/2 z-0"
               style={{ width: step === 1 ? '0%' : step === 2 ? '25%' : step === 3 ? '50%' : step === 4 ? '75%' : '100%' }}
             />
 
@@ -794,16 +850,14 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
               onClick={() => setStep(1)}
               className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
-                step >= 1 
-                  ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
-                  : 'bg-secondary border-border text-muted-foreground'
-              }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step >= 1
+                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
+                : 'bg-secondary border-border text-muted-foreground'
+                }`}>
                 {step > 1 ? <Check className="w-5 h-5" /> : <User className="w-5 h-5" />}
               </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
-                step === 1 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-              }`}>
+              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 1 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
+                }`}>
                 1. Datos Personales
               </span>
             </button>
@@ -814,16 +868,14 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
               onClick={() => setStep(2)}
               className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
-                step >= 2 
-                  ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
-                  : 'bg-secondary border-border text-muted-foreground'
-              }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step >= 2
+                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
+                : 'bg-secondary border-border text-muted-foreground'
+                }`}>
                 {step > 2 ? <Check className="w-5 h-5" /> : <Layers className="w-5 h-5" />}
               </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
-                step === 2 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-              }`}>
+              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 2 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
+                }`}>
                 2. Servicios
               </span>
             </button>
@@ -834,16 +886,14 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
               onClick={() => setStep(3)}
               className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
-                step >= 3 
-                  ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
-                  : 'bg-secondary border-border text-muted-foreground'
-              }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step >= 3
+                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
+                : 'bg-secondary border-border text-muted-foreground'
+                }`}>
                 {step > 3 ? <Check className="w-5 h-5" /> : <CreditCard className="w-5 h-5" />}
               </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
-                step === 3 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-              }`}>
+              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 3 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
+                }`}>
                 3. Facturación
               </span>
             </button>
@@ -854,16 +904,14 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
               onClick={() => setStep(4)}
               className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
-                step >= 4 
-                  ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
-                  : 'bg-secondary border-border text-muted-foreground'
-              }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step >= 4
+                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
+                : 'bg-secondary border-border text-muted-foreground'
+                }`}>
                 {step > 4 ? <Check className="w-5 h-5" /> : <Wifi className="w-5 h-5" />}
               </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
-                step === 4 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-              }`}>
+              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 4 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
+                }`}>
                 4. Red
               </span>
             </button>
@@ -874,16 +922,14 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
               onClick={() => setStep(5)}
               className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${
-                step === 5 
-                  ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20' 
-                  : 'bg-secondary border-border text-muted-foreground'
-              }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step === 5
+                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
+                : 'bg-secondary border-border text-muted-foreground'
+                }`}>
                 <Bell className="w-5 h-5" />
               </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${
-                step === 5 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-              }`}>
+              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 5 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
+                }`}>
                 5. Avisos
               </span>
             </button>
@@ -907,16 +953,28 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                   <User className="w-4 h-4" /> Información de Contacto
                 </div>
 
-                {/* Nombre completo */}
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-1.5">Nombre Completo *</label>
-                  <input
-                    type="text"
-                    placeholder="Juan Andres Perez"
-                    {...register('nombre')}
-                    className="input-field"
-                  />
-                  {errors.nombre && <p className="text-xs text-destructive mt-1">{errors.nombre.message}</p>}
+                {/* Apellidos y Nombres */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">Apellidos *</label>
+                    <input
+                      type="text"
+                      placeholder="Perez Garcia"
+                      {...register('apellidos')}
+                      className="input-field"
+                    />
+                    {errors.apellidos && <p className="text-xs text-destructive mt-1">{errors.apellidos.message}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">Nombres *</label>
+                    <input
+                      type="text"
+                      placeholder="Juan Andres"
+                      {...register('nombres')}
+                      className="input-field"
+                    />
+                    {errors.nombres && <p className="text-xs text-destructive mt-1">{errors.nombres.message}</p>}
+                  </div>
                 </div>
 
                 {/* Tipo Identificación, Identificación y Teléfono */}
@@ -1036,7 +1094,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                     <MapPin className="w-4 h-4 text-brand-400" />
                     Ubicación en el Mapa
                   </span>
-                  
+
                   <div className="flex flex-wrap gap-2 w-full sm:w-auto items-center justify-end">
                     {/* Centrar por Router / Zona */}
                     <select
@@ -1116,7 +1174,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                         ))}
                       </select>
                       {errors.plan_id && <p className="text-xs text-destructive mt-1">{errors.plan_id.message}</p>}
-                      
+
                       {/* Detalle básico del plan seleccionado */}
                       {(() => {
                         const selectedPlanObj = plans.find((p) => p.id === selectedPlanId)
@@ -1195,11 +1253,10 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                         return (
                           <label
                             key={cs.id}
-                            className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer select-none bg-secondary/10 hover:bg-secondary/20 ${
-                              isSelected
-                                ? 'border-brand-500/50 shadow-lg shadow-brand-500/5 bg-brand-500/5'
-                                : 'border-border/60 hover:border-border/80'
-                            }`}
+                            className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer select-none bg-secondary/10 hover:bg-secondary/20 ${isSelected
+                              ? 'border-brand-500/50 shadow-lg shadow-brand-500/5 bg-brand-500/5'
+                              : 'border-border/60 hover:border-border/80'
+                              }`}
                           >
                             <input
                               type="checkbox"
@@ -1218,11 +1275,10 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                                 <span className="text-[10px] font-mono font-bold text-brand-400 bg-brand-500/10 px-1.5 py-0.5 rounded">
                                   +${Number(cs.precio).toFixed(2)}
                                 </span>
-                                <span className={`text-[8px] font-bold uppercase px-1.5 py-0.2 rounded border ${
-                                  cs.recurrente
-                                    ? 'bg-blue-500/10 border-blue-500/20 text-blue-400'
-                                    : 'bg-purple-500/10 border-purple-500/20 text-purple-400'
-                                }`}>
+                                <span className={`text-[8px] font-bold uppercase px-1.5 py-0.2 rounded border ${cs.recurrente
+                                  ? 'bg-blue-500/10 border-blue-500/20 text-blue-400'
+                                  : 'bg-purple-500/10 border-purple-500/20 text-purple-400'
+                                  }`}>
                                   {cs.recurrente ? 'Mensual' : 'Pago Único'}
                                 </span>
                               </span>
@@ -1269,10 +1325,9 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">Método de Pago Habitual</label>
                     <select {...register('metodo_pago')} className="input-field cursor-pointer font-sans">
-                      <option value="transferencia">Transferencia Bancaria / Depósito</option>
-                      <option value="efectivo">Pago en Efectivo (Oficina)</option>
-                      <option value="debito_automatico">Débito Automático</option>
-                      <option value="tarjeta">Tarjeta de Crédito / Débito</option>
+                      {methods.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -1424,13 +1479,13 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 font-sans">
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">Router asignado *</label>
-                    <select {...register('router_id')} className="input-field cursor-pointer font-sans">
+                    <select {...register('gateway_id')} className="input-field cursor-pointer font-sans">
                       <option value="">Seleccione router</option>
                       {routers.map((r) => (
                         <option key={r.id} value={r.id}>{r.nombre} ({r.ip})</option>
                       ))}
                     </select>
-                    {errors.router_id && <p className="text-xs text-destructive mt-1">{errors.router_id.message}</p>}
+                    {errors.gateway_id && <p className="text-xs text-destructive mt-1">{errors.gateway_id.message}</p>}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">Tipo de Conexión *</label>
@@ -1520,8 +1575,8 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                 <div>
                   <h4 className="text-sm font-semibold text-brand-300">Configuración de Avisos y Notificaciones</h4>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed font-sans font-medium">
-                    Este módulo se encuentra en fase de diseño técnico. Las opciones seleccionadas a continuación 
-                    servirán como pre-configuración y se vincularán automáticamente cuando se active la pasarela 
+                    Este módulo se encuentra en fase de diseño técnico. Las opciones seleccionadas a continuación
+                    servirán como pre-configuración y se vincularán automáticamente cuando se active la pasarela
                     de notificaciones automáticas y alertas.
                   </p>
                 </div>

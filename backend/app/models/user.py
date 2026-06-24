@@ -28,6 +28,10 @@ class User(Base):
     )
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     inactivity_timeout: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tipo_operador: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    permisos_router: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    horario_acceso: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    permisos: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

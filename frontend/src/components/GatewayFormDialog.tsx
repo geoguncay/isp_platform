@@ -1,5 +1,5 @@
 /**
- * RouterFormDialog — Modal para crear y editar routers con test de conexión y mapa interactivo.
+ * GatewayFormDialog — Modal para crear y editar routers con test de conexión y mapa interactivo.
  */
 import { useState, useEffect, useCallback } from 'react'
 import { useForm, Resolver } from 'react-hook-form'
@@ -78,10 +78,10 @@ const routerSchema = z.object({
 
 type RouterFormData = z.infer<typeof routerSchema>
 
-interface RouterFormDialogProps {
+interface GatewayFormDialogProps {
   open: boolean
   onClose: () => void
-  router?: {
+  gateway?: {
     id: string;
     nombre: string;
     ip: string;
@@ -115,8 +115,8 @@ interface TestResult {
   error?: string
 }
 
-export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }: RouterFormDialogProps) {
-  const isEdit = !!router
+export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete }: GatewayFormDialogProps) {
+  const isEdit = !!gateway
   const [testResult, setTestResult] = useState<TestResult | null>(null)
   const [isTesting, setIsTesting] = useState(false)
 
@@ -180,27 +180,27 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
       setStep(1)
       setTestResult(null)
       setShowPassword(false)
-      if (router) {
+      if (gateway) {
         reset({
-          id: router.id,
-          nombre: router.nombre,
-          ip: router.ip,
-          puerto_api: router.puerto_api,
-          usuario_api: router.usuario_api,
+          id: gateway.id,
+          nombre: gateway.nombre,
+          ip: gateway.ip,
+          puerto_api: gateway.puerto_api,
+          usuario_api: gateway.usuario_api,
           password_api: '',
-          modelo_hw: router.modelo_hw ?? '',
-          notas: router.notas ?? '',
-          latitud: router.latitud ?? null,
-          longitud: router.longitud ?? null,
-          monitoreo_trafico: router.monitoreo_trafico ?? true,
-          control_velocidad: router.control_velocidad ?? true,
-          sincronizar_logs: router.sincronizar_logs ?? true,
-          notificaciones_alertas: router.notificaciones_alertas ?? true,
-          cola_padre: router.cola_padre ?? '',
-          address_list: router.address_list ?? '',
-          ancho_banda_up: router.ancho_banda_up ?? 0,
-          ancho_banda_down: router.ancho_banda_down ?? 0,
-          site_id: router.site_id ?? '',
+          modelo_hw: gateway.modelo_hw ?? '',
+          notas: gateway.notas ?? '',
+          latitud: gateway.latitud ?? null,
+          longitud: gateway.longitud ?? null,
+          monitoreo_trafico: gateway.monitoreo_trafico ?? true,
+          control_velocidad: gateway.control_velocidad ?? true,
+          sincronizar_logs: gateway.sincronizar_logs ?? true,
+          notificaciones_alertas: gateway.notificaciones_alertas ?? true,
+          cola_padre: gateway.cola_padre ?? '',
+          address_list: gateway.address_list ?? '',
+          ancho_banda_up: gateway.ancho_banda_up ?? 0,
+          ancho_banda_down: gateway.ancho_banda_down ?? 0,
+          site_id: gateway.site_id ?? '',
           new_site_nombre: '',
         })
         const savedPuerto = localStorage.getItem('wisp_default_puerto_api')
@@ -233,7 +233,7 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
         handleGetLocation()
       }
     }
-  }, [open, router, reset, setValue, handleGetLocation])
+  }, [open, gateway, reset, setValue, handleGetLocation])
 
   // Preseleccionar la primera cola padre y address list disponible al crear un nuevo router
   const nombreVal = watch('nombre')
@@ -276,9 +276,9 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
       }
 
       if (isEdit) {
-        await api.put(`/routers/${router!.id}`, payload)
+        await api.put(`/gateways/${gateway!.id}`, payload)
       } else {
-        await api.post('/routers', payload)
+        await api.post('/gateways', payload)
       }
     },
     onSuccess,
@@ -298,11 +298,11 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
       puerto_api: formValues.puerto_api,
       usuario_api: formValues.usuario_api,
       password_api: formValues.password_api || undefined,
-      router_id: router?.id || undefined,
+      gateway_id: gateway?.id || undefined,
     }
 
     try {
-      const { data } = await api.post('/routers/test-connection', testPayload)
+      const { data } = await api.post('/gateways/test-connection', testPayload)
       setTestResult(data)
     } catch (err) {
       const errorResponse = err as { response?: { data?: { detail?: string } } }
@@ -363,11 +363,11 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
         <div className="flex items-center justify-between p-5 border-b border-border">
           <div>
             <h2 className="text-lg font-semibold text-foreground">
-              {isEdit ? `Editar: ${router!.nombre}` : 'Agregar router'}
+              {isEdit ? `Editar: ${gateway!.nombre}` : 'Agregar gateway'}
             </h2>
           </div>
           <button
-            id="close-router-dialog"
+            id="close-gateway-dialog"
             onClick={onClose}
             className="text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -443,7 +443,7 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
 
         {/* Form */}
         <form
-          id="router-form"
+          id="gateway-form"
           onSubmit={handleSubmit((data) => saveMutation.mutate(data), onFormError)}
           className="p-5 space-y-4"
         >
@@ -951,7 +951,7 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
                   type="button"
                   onClick={() => {
                     onClose()
-                    onDelete?.(router!.id)
+                    onDelete?.(gateway!.id)
                   }}
                   className="btn-destructive px-4 justify-center flex items-center gap-1.5"
                   title="Eliminar router"
@@ -979,7 +979,7 @@ export function RouterFormDialog({ open, onClose, router, onSuccess, onDelete }:
                 className="btn-primary w-44 justify-center"
               >
                 {saveMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-                {saveMutation.isPending ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Agregar router'}
+                {saveMutation.isPending ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Agregar gateway'}
               </button>
             </div>
           </div>

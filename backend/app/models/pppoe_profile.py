@@ -19,8 +19,8 @@ class PPPoEProfile(Base):
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
     velocidad_down_mbps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     velocidad_up_mbps: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    router_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(native_uuid=False), ForeignKey("routers.id", ondelete="CASCADE"), nullable=False
+    gateway_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(native_uuid=False), ForeignKey("gateways.id", ondelete="CASCADE"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -34,12 +34,12 @@ class PPPoEProfile(Base):
 
     # Restricción única: router + nombre del perfil
     __table_args__ = (
-        UniqueConstraint("router_id", "nombre", name="uq_router_profile_nombre"),
+        UniqueConstraint("gateway_id", "nombre", name="uq_gateway_profile_nombre"),
     )
 
     # Relaciones
-    router = relationship("Router", back_populates="pppoe_profiles")
+    gateway = relationship("Gateway", back_populates="pppoe_profiles")
     pppoe_secrets = relationship("PPPoESecret", back_populates="perfil")
 
     def __repr__(self) -> str:
-        return f"<PPPoEProfile id={self.id} nombre={self.nombre} router_id={self.router_id}>"
+        return f"<PPPoEProfile id={self.id} nombre={self.nombre} gateway_id={self.gateway_id}>"

@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import api from '@/services/api'
 import TrafficChart, { formatSpeed } from '@/components/TrafficChart'
-import { RouterStatusBadge } from '@/components/RouterStatusBadge'
+import { GatewayStatusBadge } from '@/components/GatewayStatusBadge'
 
 interface Router {
   id: string
@@ -73,7 +73,7 @@ export function TrafficPage() {
   const { data: routers = [], isLoading: isLoadingRouters, refetch: refetchRouters } = useQuery<Router[]>({
     queryKey: ['routers'],
     queryFn: async () => {
-      const { data } = await api.get('/routers')
+      const { data } = await api.get('/gateways')
       return data
     },
   })

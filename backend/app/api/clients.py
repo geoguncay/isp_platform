@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import AdminOrTecnico, CurrentUser, DBSession
 from app.models.client import Client
 from app.models.plan import Plan
-from app.models.router import Router
+from app.models.gateway import Gateway
 from app.models.client_plan import ClientPlan
 from app.models.static_ip import StaticIP
 from app.models.payment import ClientPayment
@@ -100,7 +100,7 @@ def _enrich_client(client: Client, db: Session) -> dict:
         data["pppoe_secret"] = {
             "id": client.pppoe_secret.id,
             "cliente_id": client.pppoe_secret.cliente_id,
-            "router_id": client.pppoe_secret.router_id,
+            "gateway_id": client.pppoe_secret.gateway_id,
             "usuario_ppp": client.pppoe_secret.usuario_ppp,
             "perfil_id": client.pppoe_secret.perfil_id,
             "contraseña_ppp": decrypted_password,
@@ -117,7 +117,7 @@ def _enrich_client(client: Client, db: Session) -> dict:
 def list_clients(
     db: DBSession,
     _: AdminOrTecnico,
-    router_id: uuid.UUID | None = None,
+    gateway_id: uuid.UUID | None = None,
     plan_id: uuid.UUID | None = None,
     site_id: uuid.UUID | None = None,
     activo: bool | None = None,
@@ -134,11 +134,11 @@ def list_clients(
     """
     query = db.query(Client)
 
-    if router_id:
-        query = query.filter(Client.router_id == router_id)
+    if gateway_id:
+        query = query.filter(Client.gateway_id == gateway_id)
 
     if site_id:
-        query = query.join(Router, Client.router_id == Router.id).filter(Router.site_id == site_id)
+        query = query.join(Router, Client.gateway_id == Router.id).filter(Router.site_id == site_id)
 
     if activo is not None:
         query = query.filter(Client.activo == activo)
@@ -189,7 +189,7 @@ def list_clients(
     elif sort_by == "router":
         from sqlalchemy.orm import aliased
         router_alias = aliased(Router)
-        query = query.outerjoin(router_alias, Client.router_id == router_alias.id)
+        query = query.outerjoin(router_alias, Client.gateway_id == router_alias.id)
         sort_column = router_alias.nombre
     elif sort_by == "plan":
         from sqlalchemy.orm import aliased
@@ -217,7 +217,7 @@ def list_clients(
 def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> dict:
     """Crea un nuevo cliente. Opcionalmente asigna un plan inicial y sincroniza IP estática en MikroTik."""
     # Verificar que el router exista y esté activo
-    r = db.get(Router, payload.router_id)
+    r = db.get(Router, payload.gateway_id)
     if not r or not r.activo:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -250,7 +250,7 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
             )
         # Validar IP única en este router
         exists_ip = db.query(StaticIP).filter(
-            StaticIP.router_id == payload.router_id,
+            StaticIP.gateway_id == payload.gateway_id,
             StaticIP.ip == payload.ip
         ).first()
         if exists_ip:
@@ -276,7 +276,7 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
             )
         # Validar usuario único
         exists_user = db.query(PPPoESecret).filter(
-            PPPoESecret.router_id == payload.router_id,
+            PPPoESecret.gateway_id == payload.gateway_id,
             PPPoESecret.usuario_ppp == payload.usuario_ppp
         ).first()
         if exists_user:
@@ -290,7 +290,7 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
         
         # Buscar o crear el PPPoEProfile local para este router y plan
         profile = db.query(PPPoEProfile).filter(
-            PPPoEProfile.router_id == payload.router_id,
+            PPPoEProfile.gateway_id == payload.gateway_id,
             PPPoEProfile.nombre == plan.nombre
         ).first()
         if not profile:
@@ -298,7 +298,7 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
                 nombre=plan.nombre,
                 velocidad_down_mbps=plan.velocidad_down_mbps,
                 velocidad_up_mbps=plan.velocidad_up_mbps,
-                router_id=payload.router_id
+                gateway_id=payload.gateway_id
             )
             db.add(profile)
             db.flush()
@@ -315,13 +315,15 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
             )
 
     client = Client(
-        nombre=payload.nombre,
+        nombre=f"{payload.apellidos} {payload.nombres}".strip(),
+        apellidos=payload.apellidos,
+        nombres=payload.nombres,
         cedula=payload.cedula,
         telefono=payload.telefono,
         direccion=payload.direccion,
         latitud=payload.latitud,
         longitud=payload.longitud,
-        router_id=payload.router_id,
+        gateway_id=payload.gateway_id,
         tipo=payload.tipo,
         activo=True,
         email=payload.email,
@@ -356,7 +358,7 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
             cliente_id=client.id,
             ip=payload.ip,
             mac=payload.mac,
-            router_id=payload.router_id,
+            gateway_id=payload.gateway_id,
             notas=payload.notas_ip,
         )
         db.add(static_ip)
@@ -395,7 +397,7 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
             usuario_ppp=payload.usuario_ppp,
             contraseña_ppp=encrypt_secret(payload.contraseña_ppp),
             perfil_id=profile.id,
-            router_id=payload.router_id,
+            gateway_id=payload.gateway_id,
         )
         db.add(pppoe_sec)
         
@@ -452,8 +454,8 @@ def update_client(
             )
 
     # Validar router si cambia
-    if "router_id" in update_data and update_data["router_id"] != client.router_id:
-        r = db.get(Router, update_data["router_id"])
+    if "gateway_id" in update_data and update_data["gateway_id"] != client.gateway_id:
+        r = db.get(Router, update_data["gateway_id"])
         if not r or not r.activo:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -462,8 +464,8 @@ def update_client(
 
     old_ip = client.static_ip.ip if client.static_ip else None
     old_router = client.router
-    old_router_id = client.router_id
-    new_router_id = update_data.get("router_id", client.router_id)
+    old_gateway_id = client.gateway_id
+    new_gateway_id = update_data.get("gateway_id", client.gateway_id)
     new_tipo = update_data.get("tipo", client.tipo)
 
     # Si el tipo cambia a pppoe y tenía una IP estática, removerla de MikroTik y BD
@@ -496,9 +498,9 @@ def update_client(
              )
 
         # Validar IP única en el router de destino
-        if "ip" in update_data or "router_id" in update_data:
+        if "ip" in update_data or "gateway_id" in update_data:
             exists_ip = db.query(StaticIP).filter(
-                StaticIP.router_id == new_router_id,
+                StaticIP.gateway_id == new_gateway_id,
                 StaticIP.ip == ip_val,
                 StaticIP.cliente_id != client.id
             ).first()
@@ -508,10 +510,10 @@ def update_client(
                     detail=f"La dirección IP {ip_val} ya está asignada a otro cliente en este router.",
                 )
 
-        new_router = db.get(Router, new_router_id)
+        new_router = db.get(Router, new_gateway_id)
 
         # Remover IP anterior si cambió de IP o de router
-        if old_ip and (old_ip != ip_val or old_router_id != new_router_id):
+        if old_ip and (old_ip != ip_val or old_gateway_id != new_gateway_id):
             try:
                 remove_ip_from_address_list(old_router, old_ip)
             except Exception as e:
@@ -525,14 +527,14 @@ def update_client(
         if client.static_ip:
             client.static_ip.ip = ip_val
             client.static_ip.mac = update_data.get("mac", client.static_ip.mac)
-            client.static_ip.router_id = new_router_id
+            client.static_ip.gateway_id = new_gateway_id
             client.static_ip.notas = update_data.get("notas_ip", client.static_ip.notas)
         else:
             client.static_ip = StaticIP(
                 cliente_id=client.id,
                 ip=ip_val,
                 mac=update_data.get("mac"),
-                router_id=new_router_id,
+                gateway_id=new_gateway_id,
                 notas=update_data.get("notas_ip"),
             )
 
@@ -597,9 +599,9 @@ def update_client(
             )
 
         # Validar usuario único en el router de destino
-        if "usuario_ppp" in update_data or "router_id" in update_data:
+        if "usuario_ppp" in update_data or "gateway_id" in update_data:
             exists_user = db.query(PPPoESecret).filter(
-                PPPoESecret.router_id == new_router_id,
+                PPPoESecret.gateway_id == new_gateway_id,
                 PPPoESecret.usuario_ppp == user_val,
                 PPPoESecret.cliente_id != client.id
             ).first()
@@ -624,7 +626,7 @@ def update_client(
 
         # Buscar o crear el PPPoEProfile local para este router y plan
         profile = db.query(PPPoEProfile).filter(
-            PPPoEProfile.router_id == new_router_id,
+            PPPoEProfile.gateway_id == new_gateway_id,
             PPPoEProfile.nombre == plan.nombre
         ).first()
         if not profile:
@@ -632,13 +634,13 @@ def update_client(
                 nombre=plan.nombre,
                 velocidad_down_mbps=plan.velocidad_down_mbps,
                 velocidad_up_mbps=plan.velocidad_up_mbps,
-                router_id=new_router_id
+                gateway_id=new_gateway_id
             )
             db.add(profile)
             db.flush()
 
         perf_id = profile.id
-        new_router = db.get(Router, new_router_id)
+        new_router = db.get(Router, new_gateway_id)
 
         # Asegurar perfil en MikroTik
         try:
@@ -651,11 +653,11 @@ def update_client(
                 detail=f"No se pudo configurar el perfil PPPoE en el router MikroTik. Error: {str(e)}"
             )
 
-        new_router = db.get(Router, new_router_id)
+        new_router = db.get(Router, new_gateway_id)
 
         # Remover secreto anterior si cambió de usuario o de router
         old_user = client.pppoe_secret.usuario_ppp if client.pppoe_secret else None
-        if old_user and (old_user != user_val or old_router_id != new_router_id):
+        if old_user and (old_user != user_val or old_gateway_id != new_gateway_id):
             try:
                 remove_pppoe_secret_from_router(old_router, old_user)
             except Exception as e:
@@ -667,14 +669,14 @@ def update_client(
             if "contraseña_ppp" in update_data:
                 client.pppoe_secret.contraseña_ppp = encrypt_secret(update_data["contraseña_ppp"])
             client.pppoe_secret.perfil_id = perf_id
-            client.pppoe_secret.router_id = new_router_id
+            client.pppoe_secret.gateway_id = new_gateway_id
         else:
             client.pppoe_secret = PPPoESecret(
                 cliente_id=client.id,
                 usuario_ppp=user_val,
                 contraseña_ppp=encrypt_secret(pass_val),
                 perfil_id=perf_id,
-                router_id=new_router_id,
+                gateway_id=new_gateway_id,
             )
 
         # Sincronizar secreto PPPoE en el router MikroTik según estado activo
@@ -713,6 +715,9 @@ def update_client(
     for field, value in update_data.items():
         if field not in ("ip", "mac", "notas_ip", "usuario_ppp", "contraseña_ppp", "perfil_id", "custom_service_ids"):
             setattr(client, field, value)
+
+    if "apellidos" in update_data or "nombres" in update_data:
+        client.nombre = f"{client.apellidos} {client.nombres}".strip()
 
     if "custom_service_ids" in update_data:
         if update_data["custom_service_ids"]:
@@ -833,7 +838,7 @@ def assign_client_plan(
         try:
             # 1. Buscar o crear el PPPoEProfile local para este router y plan
             profile = db.query(PPPoEProfile).filter(
-                PPPoEProfile.router_id == client.router_id,
+                PPPoEProfile.gateway_id == client.gateway_id,
                 PPPoEProfile.nombre == plan.nombre
             ).first()
             if not profile:
@@ -841,7 +846,7 @@ def assign_client_plan(
                     nombre=plan.nombre,
                     velocidad_down_mbps=plan.velocidad_down_mbps,
                     velocidad_up_mbps=plan.velocidad_up_mbps,
-                    router_id=client.router_id
+                    gateway_id=client.gateway_id
                 )
                 db.add(profile)
                 db.flush()
@@ -1257,4 +1262,396 @@ def get_client_traffic(client_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -
         "cliente_id": client_id,
         "history": history
     }
+
+
+from app.schemas.client_import import ImportValidationResponse, BulkImportPayload
+
+
+@router.post("/import/validate", response_model=ImportValidationResponse)
+def validate_import_data(
+    payload: list[dict],
+    db: DBSession,
+    _: AdminOrTecnico
+) -> ImportValidationResponse:
+    """
+    Valida un listado de filas JSON provenientes del CSV mapeado en el frontend.
+    Verifica campos requeridos, duplicados de cédula, validez de cédula ecuatoriana,
+    disponibilidad de IP o usuario PPPoE en el router, etc.
+    """
+    import uuid
+    from app.schemas.client_import import ImportValidationResponse, CSVRowValidation
+    from app.core.validators import validate_ecuadorian_cedula
+    from app.models.gateway import Gateway
+    from app.models.plan import Plan
+    from app.models.static_ip import StaticIP
+    from app.models.pppoe_secret import PPPoESecret
+
+    def split_name_helper(full_name: str) -> tuple[str, str]:
+        trimmed = (full_name or "").strip()
+        if ',' in trimmed:
+            parts = trimmed.split(',')
+            return parts[0].strip(), ",".join(parts[1:]).strip()
+        words = trimmed.split()
+        if len(words) <= 1:
+            return "", trimmed
+        elif len(words) == 2:
+            return words[1], words[0]
+        elif len(words) == 3:
+            return " ".join(words[1:]), words[0]
+        else:
+            middle = len(words) // 2
+            return " ".join(words[middle:]), " ".join(words[:middle])
+
+    rows_validation = []
+    detected_routers = set()
+    detected_plans = set()
+    
+    seen_cedulas = set()
+    seen_ips = {}  # gateway_id/name -> set
+    seen_ppp_users = {}  # gateway_id/name -> set
+
+    for idx, row in enumerate(payload):
+        errors = []
+        warnings = []
+        
+        apellidos = row.get("apellidos", "").strip() if row.get("apellidos") else ""
+        nombres = row.get("nombres", "").strip() if row.get("nombres") else ""
+        
+        if not apellidos and not nombres and row.get("nombre"):
+            apellidos, nombres = split_name_helper(row.get("nombre"))
+            
+        nombre = f"{apellidos} {nombres}".strip()
+        row["nombre"] = nombre
+        row["apellidos"] = apellidos
+        row["nombres"] = nombres
+        cedula = row.get("cedula", "").strip() if row.get("cedula") else ""
+        telefono = row.get("telefono", "").strip() if row.get("telefono") else ""
+        direccion = row.get("direccion", "").strip() if row.get("direccion") else ""
+        tipo = row.get("tipo", "static").strip().lower() if row.get("tipo") else "static"
+        
+        if not apellidos:
+            errors.append("Apellidos son requeridos.")
+        if not nombres:
+            errors.append("Nombres son requeridos.")
+        if not cedula:
+            errors.append("La cédula es requerida.")
+        if not telefono:
+            errors.append("El teléfono es requerido.")
+        if not direccion:
+            errors.append("La dirección es requerida.")
+            
+        if tipo not in ("static", "pppoe"):
+            errors.append("El tipo de conexión debe ser 'static' o 'pppoe'.")
+
+        if cedula:
+            if not validate_ecuadorian_cedula(cedula):
+                errors.append(f"La cédula o RUC '{cedula}' no es una cédula ecuatoriana válida.")
+            elif cedula in seen_cedulas:
+                errors.append(f"La cédula '{cedula}' está duplicada dentro del archivo de importación.")
+            else:
+                seen_cedulas.add(cedula)
+                exists_cedula = db.query(Client).filter(Client.cedula == cedula).first()
+                if exists_cedula:
+                    errors.append(f"La cédula '{cedula}' ya está registrada en el sistema (pertenece a {exists_cedula.nombre}).")
+
+        router_raw = row.get("router", "").strip() if row.get("router") else ""
+        plan_raw = row.get("plan", "").strip() if row.get("plan") else ""
+        
+        if router_raw:
+            detected_routers.add(router_raw)
+        else:
+            errors.append("El router es requerido.")
+
+        if plan_raw:
+            detected_plans.add(plan_raw)
+
+        router = None
+        if router_raw:
+            try:
+                router_uuid = uuid.UUID(router_raw)
+                router = db.get(Router, router_uuid)
+            except ValueError:
+                router = db.query(Router).filter(Router.nombre.ilike(router_raw)).first()
+            
+            if not router:
+                errors.append(f"El router '{router_raw}' no existe en el sistema.")
+            elif not router.activo:
+                errors.append(f"El router '{router.nombre}' está inactivo.")
+
+        plan = None
+        if plan_raw:
+            try:
+                plan_uuid = uuid.UUID(plan_raw)
+                plan = db.get(Plan, plan_uuid)
+            except ValueError:
+                plan = db.query(Plan).filter(Plan.nombre.ilike(plan_raw)).first()
+            
+            if not plan:
+                warnings.append(f"El plan '{plan_raw}' no fue encontrado. Se requerirá mapeo.")
+
+        if router and tipo == "static":
+            ip = row.get("ip", "").strip() if row.get("ip") else ""
+            mac = row.get("mac", "").strip() if row.get("mac") else ""
+            if not ip:
+                errors.append("La dirección IP es requerida para conexiones con IP Estática.")
+            else:
+                router_key = str(router.id)
+                if router_key not in seen_ips:
+                    seen_ips[router_key] = set()
+                
+                if ip in seen_ips[router_key]:
+                    errors.append(f"La IP '{ip}' está duplicada en este router dentro del archivo de importación.")
+                else:
+                    seen_ips[router_key].add(ip)
+                    exists_ip = db.query(StaticIP).filter(
+                        StaticIP.gateway_id == router.id,
+                        StaticIP.ip == ip
+                    ).first()
+                    if exists_ip:
+                        errors.append(f"La dirección IP '{ip}' ya está asignada a otro cliente en este router.")
+                        
+            if mac and len(mac) != 17:
+                errors.append("La dirección MAC debe tener formato válido de 17 caracteres (ej: XX:XX:XX:XX:XX:XX).")
+
+        elif router and tipo == "pppoe":
+            usuario_ppp = row.get("usuario_ppp", "").strip() if row.get("usuario_ppp") else ""
+            contraseña_ppp = row.get("contraseña_ppp", "").strip() if row.get("contraseña_ppp") else ""
+            
+            if not usuario_ppp:
+                errors.append("El usuario PPPoE es requerido.")
+            else:
+                router_key = str(router.id)
+                if router_key not in seen_ppp_users:
+                    seen_ppp_users[router_key] = set()
+                
+                if usuario_ppp in seen_ppp_users[router_key]:
+                    errors.append(f"El usuario PPPoE '{usuario_ppp}' está duplicado en este router dentro del archivo.")
+                else:
+                    seen_ppp_users[router_key].add(usuario_ppp)
+                    exists_user = db.query(PPPoESecret).filter(
+                        PPPoESecret.gateway_id == router.id,
+                        PPPoESecret.usuario_ppp == usuario_ppp
+                    ).first()
+                    if exists_user:
+                        errors.append(f"El usuario PPPoE '{usuario_ppp}' ya está asignado en este router.")
+                        
+            if not contraseña_ppp:
+                errors.append("La contraseña PPPoE es requerida.")
+            if not plan_raw:
+                errors.append("El plan es obligatorio para conexiones PPPoE.")
+
+        rows_validation.append(
+            CSVRowValidation(
+                index=idx,
+                data=row,
+                valid=len(errors) == 0,
+                errors=errors,
+                warnings=warnings
+            )
+        )
+
+    valid_count = sum(1 for r in rows_validation if r.valid)
+    return ImportValidationResponse(
+        rows=rows_validation,
+        total_rows=len(payload),
+        valid_rows=valid_count,
+        invalid_rows=len(payload) - valid_count,
+        detected_routers=sorted(list(detected_routers)),
+        detected_plans=sorted(list(detected_plans))
+    )
+
+
+@router.post("/import/commit")
+def commit_import_clients(
+    payload: BulkImportPayload,
+    db: DBSession,
+    _: AdminOrTecnico
+) -> dict:
+    """
+    Realiza la importación definitiva de la lista de clientes pre-validados.
+    Intenta crear cada cliente individualmente. Si un cliente falla,
+    se registra el error y se continúa con el siguiente para no bloquear toda la importación.
+    """
+    import uuid
+    from app.schemas.client_import import BulkImportPayload
+    from app.models.gateway import Gateway
+    from app.models.plan import Plan
+    from app.models.static_ip import StaticIP
+    from app.models.pppoe_secret import PPPoESecret
+    from app.models.pppoe_profile import PPPoEProfile
+    from app.models.client_plan import ClientPlan
+    from app.models.custom_service import CustomService
+    from app.services.mikrotik.address_list import sync_ip_in_address_list
+    from app.services.mikrotik.queue import sync_client_queue
+    from app.services.mikrotik.pppoe import sync_pppoe_secret_in_router
+    from app.core.security import encrypt_secret
+
+    successes = []
+    failures = []
+    
+    for idx, client_data in enumerate(payload.clients):
+        try:
+            with db.begin_nested():
+                r = db.get(Router, client_data.gateway_id)
+                if not r or not r.activo:
+                    raise Exception("El router especificado no existe o está inactivo.")
+                
+                exists = db.query(Client).filter(Client.cedula == client_data.cedula).first()
+                if exists:
+                    raise Exception(f"Ya existe un cliente con la cédula {client_data.cedula}.")
+                
+                if client_data.plan_id:
+                    p = db.get(Plan, client_data.plan_id)
+                    if not p:
+                        raise Exception("El plan especificado no existe.")
+                
+                if client_data.tipo == "static":
+                    if not client_data.ip:
+                        raise Exception("La dirección IP es obligatoria para conexiones con IP Estática.")
+                    exists_ip = db.query(StaticIP).filter(
+                        StaticIP.gateway_id == client_data.gateway_id,
+                        StaticIP.ip == client_data.ip
+                    ).first()
+                    if exists_ip:
+                        raise Exception(f"La dirección IP {client_data.ip} ya está asignada en este router.")
+                
+                elif client_data.tipo == "pppoe":
+                    if not client_data.usuario_ppp:
+                        raise Exception("El usuario PPPoE es obligatorio para conexiones PPPoE.")
+                    if not client_data.contraseña_ppp:
+                        raise Exception("La contraseña PPPoE es obligatoria para conexiones PPPoE.")
+                    if not client_data.plan_id:
+                        raise Exception("El plan es obligatorio para conexiones PPPoE.")
+                    
+                    exists_user = db.query(PPPoESecret).filter(
+                        PPPoESecret.gateway_id == client_data.gateway_id,
+                        PPPoESecret.usuario_ppp == client_data.usuario_ppp
+                    ).first()
+                    if exists_user:
+                        raise Exception(f"El usuario PPPoE '{client_data.usuario_ppp}' ya está asignado en este router.")
+                    
+                    plan = db.get(Plan, client_data.plan_id)
+                    profile = db.query(PPPoEProfile).filter(
+                        PPPoEProfile.gateway_id == client_data.gateway_id,
+                        PPPoEProfile.nombre == plan.nombre
+                    ).first()
+                    if not profile:
+                        profile = PPPoEProfile(
+                            nombre=plan.nombre,
+                            velocidad_down_mbps=plan.velocidad_down_mbps,
+                            velocidad_up_mbps=plan.velocidad_up_mbps,
+                            gateway_id=client_data.gateway_id
+                        )
+                        db.add(profile)
+                        db.flush()
+                    
+                    from app.services.mikrotik.pppoe import sync_pppoe_profile_in_router
+                    sync_pppoe_profile_in_router(r, plan)
+                
+                client = Client(
+                    nombre=f"{client_data.apellidos} {client_data.nombres}".strip(),
+                    apellidos=client_data.apellidos,
+                    nombres=client_data.nombres,
+                    cedula=client_data.cedula,
+                    telefono=client_data.telefono,
+                    direccion=client_data.direccion,
+                    latitud=client_data.latitud,
+                    longitud=client_data.longitud,
+                    gateway_id=client_data.gateway_id,
+                    tipo=client_data.tipo,
+                    activo=True,
+                    email=client_data.email,
+                    inicio_facturacion=client_data.inicio_facturacion,
+                    dia_inicio_periodo=client_data.dia_inicio_periodo,
+                    crear_factura_anticipo_dias=client_data.crear_factura_anticipo_dias,
+                    tipo_facturacion=client_data.tipo_facturacion,
+                    auto_aplicar_pago=client_data.auto_aplicar_pago,
+                    usar_credito_auto=client_data.usar_credito_auto,
+                    prorrateo_separado=client_data.prorrateo_separado,
+                )
+                if client_data.custom_service_ids:
+                    client.custom_services = db.query(CustomService).filter(CustomService.id.in_(client_data.custom_service_ids)).all()
+                if client_data.created_at:
+                    client.created_at = client_data.created_at
+                db.add(client)
+                db.flush()
+                
+                if client_data.plan_id:
+                    client_plan = ClientPlan(
+                        cliente_id=client.id,
+                        plan_id=client_data.plan_id,
+                        fecha_inicio=datetime.now(),
+                        estado="activo",
+                    )
+                    db.add(client_plan)
+                
+                if client_data.tipo == "static" and client_data.ip:
+                    static_ip = StaticIP(
+                        cliente_id=client.id,
+                        ip=client_data.ip,
+                        mac=client_data.mac,
+                        gateway_id=client_data.gateway_id,
+                        notas=client_data.notas_ip,
+                    )
+                    db.add(static_ip)
+                    
+                    p = db.get(Plan, client_data.plan_id) if client_data.plan_id else None
+                    addr_list_name = get_clean_list_name(r.address_list or (p.address_list if p else None))
+                    sync_ip_in_address_list(r, client_data.ip, client.nombre, list_name=addr_list_name)
+                    if p:
+                        sync_client_queue(
+                            router=r,
+                            client_name=client.nombre,
+                            ip=client_data.ip,
+                            speed_up=p.velocidad_up_kbps,
+                            speed_down=p.velocidad_down_kbps,
+                            plan_name=p.nombre,
+                            limit_at_up=p.limit_at_up_kbps,
+                            limit_at_down=p.limit_at_down_kbps,
+                            burst_threshold_up=p.burst_threshold_up_kbps,
+                            burst_threshold_down=p.burst_threshold_down_kbps,
+                            prioridad=p.prioridad,
+                            parent=get_clean_parent_name(r.cola_padre or p.parent),
+                        )
+                
+                elif client_data.tipo == "pppoe" and client_data.usuario_ppp and client_data.contraseña_ppp:
+                    pppoe_sec = PPPoESecret(
+                        cliente_id=client.id,
+                        usuario_ppp=client_data.usuario_ppp,
+                        contraseña_ppp=encrypt_secret(client_data.contraseña_ppp),
+                        perfil_id=profile.id,
+                        gateway_id=client_data.gateway_id,
+                    )
+                    db.add(pppoe_sec)
+                    sync_pppoe_secret_in_router(
+                        router=r,
+                        username=client_data.usuario_ppp,
+                        password=client_data.contraseña_ppp,
+                        profile_name=profile.nombre,
+                        client_name=client.nombre,
+                        disabled=False
+                    )
+            
+            db.commit()
+            successes.append({
+                "nombre": client_data.nombre,
+                "cedula": client_data.cedula
+            })
+        except Exception as e:
+            db.rollback()
+            failures.append({
+                "nombre": client_data.nombre,
+                "cedula": client_data.cedula,
+                "error": str(e)
+            })
+            
+    return {
+        "success": len(failures) == 0,
+        "total": len(payload.clients),
+        "imported_count": len(successes),
+        "failed_count": len(failures),
+        "successes": successes,
+        "failures": failures
+    }
+
 

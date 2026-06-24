@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field, IPvAnyAddress
 
 
-class RouterCreate(BaseModel):
+class GatewayCreate(BaseModel):
     nombre: str = Field(min_length=2, max_length=120)
     ip: str = Field(
         min_length=7,
@@ -40,7 +40,7 @@ class RouterCreate(BaseModel):
 
 
 
-class RouterUpdate(BaseModel):
+class GatewayUpdate(BaseModel):
     nombre: str | None = Field(default=None, min_length=2, max_length=120)
     ip: str | None = Field(default=None, min_length=7, max_length=45)
     puerto_api: int | None = Field(default=None, ge=1, le=65535)
@@ -68,7 +68,7 @@ class RouterUpdate(BaseModel):
 
 
 
-class RouterRead(BaseModel):
+class GatewayRead(BaseModel):
     model_config = {"from_attributes": True}
 
     id: uuid.UUID
@@ -105,8 +105,8 @@ class RouterRead(BaseModel):
     ros_version: str | None = None
 
 
-class RouterStatus(BaseModel):
-    router_id: uuid.UUID
+class GatewayStatus(BaseModel):
+    gateway_id: uuid.UUID
     status: str                         # "online" | "offline" | "degraded"
     ip: str
     uptime: str | None = None
@@ -116,7 +116,7 @@ class RouterStatus(BaseModel):
     checked_at: datetime
 
 
-class RouterTestResult(BaseModel):
+class GatewayTestResult(BaseModel):
     success: bool
     message: str
     ros_version: str | None = None
@@ -124,10 +124,10 @@ class RouterTestResult(BaseModel):
     error: str | None = None
 
 
-class RouterTestPayload(BaseModel):
+class GatewayTestPayload(BaseModel):
     ip: str
     puerto_api: int = 8728
     usuario_api: str
     password_api: str | None = None
-    router_id: uuid.UUID | None = None
+    gateway_id: uuid.UUID | None = None
 

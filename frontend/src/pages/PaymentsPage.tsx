@@ -61,9 +61,6 @@ export function PaymentsPage() {
             <Wallet className="w-7 h-7 text-primary" />
             <span>Caja del Día</span>
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Resumen en tiempo real de los ingresos recaudados hoy por canal de cobro.
-          </p>
         </div>
 
         {/* Refrescar */}

@@ -1,5 +1,5 @@
 from app.models.user import User
-from app.models.router import Router
+from app.models.gateway import Gateway
 from app.models.company import Company
 from app.models.plan import Plan
 from app.models.client import Client
@@ -14,6 +14,5 @@ from app.models.pppoe_profile import PPPoEProfile
 from app.models.pppoe_secret import PPPoESecret
 from app.models.custom_service import CustomService
 from app.models.site import Site
-
-
-
+from app.models.supplier import Supplier
+from app.models.inventory import InventoryItem
