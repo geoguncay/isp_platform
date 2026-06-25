@@ -1,18 +1,18 @@
 /**
- * GatewayFormDialog — Modal para crear y editar routers con test de conexión y mapa interactivo.
+ * GatewayFormDialog — Modal para crear y editar gateways con test de conexión y mapa interactivo.
  */
 import { useState, useEffect, useCallback } from 'react'
 import { useForm, Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { X, Loader2, CheckCircle2, XCircle, Plug, Eye, EyeOff, Trash2, MapPin, Server, Key, Activity, Check, Router, Hash } from 'lucide-react'
+import { X, Loader2, CheckCircle2, XCircle, Plug, Eye, EyeOff, Trash2, MapPin, Server, Key, Activity, Check, Router as GatewayIcon, Hash } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import api from '@/services/api'
 
-// Icono personalizado SVG de Leaflet para evitar problemas de rutas de Vite (Color Violeta para Routers)
+// Icono personalizado SVG de Leaflet para evitar problemas de rutas de Vite (Color Violeta para Gateways)
 const markerSvg = `data:image/svg+xml;utf8,${encodeURIComponent(`
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%238b5cf6" width="36" height="36">
     <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
@@ -29,7 +29,7 @@ const customMarkerIcon = L.icon({
 // Centrado por defecto en Quito, Ecuador
 const DEFAULT_CENTER: [number, number] = [-0.180653, -78.467834]
 
-const routerSchema = z.object({
+const gatewaySchema = z.object({
   id: z.string().optional(),
   nombre: z.string().min(2, 'Mínimo 2 caracteres').max(120),
   ip: z.string().min(7, 'IP inválida').max(45),
@@ -52,7 +52,7 @@ const routerSchema = z.object({
   new_site_nombre: z.string().max(120).optional().nullable(),
 }).refine(
   (data) => {
-    // La contraseña es obligatoria solo si es un router nuevo (no hay id)
+    // La contraseña es obligatoria solo si es un gateway nuevo (no hay id)
     if (!data.id && (!data.password_api || data.password_api.trim() === '')) {
       return false
     }
@@ -76,7 +76,7 @@ const routerSchema = z.object({
   }
 )
 
-type RouterFormData = z.infer<typeof routerSchema>
+type GatewayFormData = z.infer<typeof gatewaySchema>
 
 interface GatewayFormDialogProps {
   open: boolean
@@ -141,8 +141,8 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
     watch,
     trigger,
     formState: { errors },
-  } = useForm<RouterFormData>({
-    resolver: zodResolver(routerSchema) as unknown as Resolver<RouterFormData>,
+  } = useForm<GatewayFormData>({
+    resolver: zodResolver(gatewaySchema) as unknown as Resolver<GatewayFormData>,
     defaultValues: {
       puerto_api: 8728,
       monitoreo_trafico: true,
@@ -203,6 +203,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
           site_id: gateway.site_id ?? '',
           new_site_nombre: '',
         })
+      } else {
         const savedPuerto = localStorage.getItem('wisp_default_puerto_api')
         const savedUsuario = localStorage.getItem('wisp_default_usuario_api')
         const savedPassword = localStorage.getItem('wisp_default_password_api')
@@ -235,7 +236,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
     }
   }, [open, gateway, reset, setValue, handleGetLocation])
 
-  // Preseleccionar la primera cola padre y address list disponible al crear un nuevo router
+  // Preseleccionar la primera cola padre y address list disponible al crear un nuevo gateway
   const nombreVal = watch('nombre')
   const selectedSiteId = watch('site_id')
 
@@ -256,7 +257,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
   }, [nombreVal, isEdit, setValue])
 
   const saveMutation = useMutation({
-    mutationFn: async (data: RouterFormData) => {
+    mutationFn: async (data: GatewayFormData) => {
       const payload = { ...data }
       delete payload.id
       if (isEdit && !payload.password_api) {
@@ -453,18 +454,18 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
               {/* Columna Izquierda: Formulario */}
               <div className="space-y-4">
                 <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
-                  <Server className="w-4 h-4" /> Especificaciones del Router
+                  <Server className="w-4 h-4" /> Especificaciones del Gateway
                 </div>
 
                  {/* Nombre */}
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-1.5">
-                    Nombre del router *
+                    Nombre del gateway *
                   </label>
                   <input
-                    id="router-nombre"
+                    id="gateway-nombre"
                     type="text"
-                    placeholder="Router Principal Quito"
+                    placeholder="Gateway Principal Quito"
                     {...register('nombre')}
                     className="input-field"
                   />
@@ -477,7 +478,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                     Sitio / Ubicación
                   </label>
                   <select
-                    id="router-site"
+                    id="gateway-site"
                     {...register('site_id')}
                     className="input-field cursor-pointer font-medium"
                   >
@@ -498,7 +499,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                       Nombre del nuevo sitio *
                     </label>
                     <input
-                      id="router-new-site"
+                      id="gateway-new-site"
                       type="text"
                       placeholder="Ej. Torre Central, Nodo Norte"
                       {...register('new_site_nombre')}
@@ -518,7 +519,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                     Modelo hardware <span className="text-muted-foreground text-xs">(opcional)</span>
                   </label>
                   <input
-                    id="router-model"
+                    id="gateway-model"
                     type="text"
                     placeholder="RB5009, RB4011iGS+, CCR2116, etc."
                     {...register('modelo_hw')}
@@ -556,7 +557,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                     Notas <span className="text-muted-foreground text-xs">(opcional)</span>
                   </label>
                   <textarea
-                    id="router-notas"
+                    id="gateway-notas"
                     rows={3}
                     placeholder="Ubicación, observaciones..."
                     {...register('notas')}
@@ -570,7 +571,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-sm font-medium text-foreground flex items-center gap-1.5">
                     <MapPin className="w-4 h-4 text-brand-400" />
-                    Marcar ubicación del Router en el mapa
+                    Marcar ubicación del Gateway en el mapa
                   </span>
                   <button
                     type="button"
@@ -619,7 +620,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                       Dirección IP / Host *
                     </label>
                     <input
-                      id="router-ip"
+                      id="gateway-ip"
                       type="text"
                       placeholder="192.168.88.1"
                       {...register('ip')}
@@ -632,7 +633,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">Puerto API *</label>
                     <input
-                      id="router-port"
+                      id="gateway-port"
                       type="number"
                       {...register('puerto_api')}
                       className="input-field font-mono"
@@ -650,7 +651,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                       Usuario API *
                     </label>
                     <input
-                      id="router-user"
+                      id="gateway-user"
                       type="text"
                       placeholder="admin"
                       {...register('usuario_api')}
@@ -666,7 +667,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                     </label>
                     <div className="relative">
                       <input
-                        id="router-password"
+                        id="gateway-password"
                         type={showPassword ? 'text' : 'password'}
                         placeholder="••••••••"
                         {...register('password_api')}
@@ -674,7 +675,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                       />
                       <button
                         type="button"
-                        id="toggle-router-password-visibility"
+                        id="toggle-gateway-password-visibility"
                         onClick={() => setShowPassword(!showPassword)}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -755,9 +756,9 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                   <Activity className="w-5 h-5 animate-pulse" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-brand-300">Configuración de Servicios del Router</h4>
+                  <h4 className="text-sm font-semibold text-brand-300">Configuración de Servicios del Gateway</h4>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                    Habilite o deshabilite las funciones y herramientas de control automatizadas para este router.
+                    Habilite o deshabilite las funciones y herramientas de control automatizadas para este gateway.
                     Los servicios configurados se ejecutarán en segundo plano de manera periódica.
                   </p>
                 </div>
@@ -820,7 +821,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                         </select>
                       ) : (
                         <div className="input-field flex items-center gap-2 text-muted-foreground text-xs italic select-none bg-secondary/20">
-                          <Router className="w-3.5 h-3.5 flex-shrink-0" />
+                          <GatewayIcon className="w-3.5 h-3.5 flex-shrink-0" />
                           Sin colas configuradas — administra desde Ajustes → MikroTik
                         </div>
                       )
@@ -954,7 +955,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                     onDelete?.(gateway!.id)
                   }}
                   className="btn-destructive px-4 justify-center flex items-center gap-1.5"
-                  title="Eliminar router"
+                  title="Eliminar gateway"
                 >
                   <Trash2 className="w-4 h-4" />
                   <span>Eliminar</span>
@@ -965,7 +966,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
             <div className="flex gap-3">
               <button
                 type="button"
-                id="cancel-router-form"
+                id="cancel-gateway-form"
                 onClick={onClose}
                 className="btn-secondary w-32 justify-center"
               >
@@ -974,7 +975,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
 
               <button
                 type="submit"
-                id="save-router-btn"
+                id="save-gateway-btn"
                 disabled={saveMutation.isPending}
                 className="btn-primary w-44 justify-center"
               >

@@ -1,5 +1,5 @@
 /**
- * GatewaysPage — Gestión de routers MikroTik con estado en tiempo real.
+ * GatewaysPage — Gestión de gateways MikroTik con estado en tiempo real.
  */
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -11,7 +11,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useNavigate } from 'react-router-dom'
 import { formatUptime } from '@/lib/utils'
 
-interface Router {
+interface Gateway {
   id: string
   nombre: string
   ip: string
@@ -31,12 +31,12 @@ interface Router {
   site_nombre?: string | null
 }
 
-async function fetchRouters(): Promise<Router[]> {
+async function fetchGateways(): Promise<Gateway[]> {
   const { data } = await api.get('/gateways')
   return data
 }
 
-async function deleteRouter(id: string): Promise<void> {
+async function deleteGateway(id: string): Promise<void> {
   await api.delete(`/gateways/${id}`)
 }
 
@@ -47,64 +47,64 @@ export function GatewaysPage() {
   const navigate = useNavigate()
 
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingGateway, setEditingGateway] = useState<Router | null>(null)
+  const [editingGateway, setEditingGateway] = useState<Gateway | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
   // Address-list client import states
-  const [importingRouter, setImportingRouter] = useState<Router | null>(null)
+  const [importingGateway, setImportingGateway] = useState<Gateway | null>(null)
   const [selectedListName, setSelectedListName] = useState('clientes')
   const [customListName, setCustomListName] = useState('')
 
-  // Query to get address list names from the selected router
+  // Query to get address list names from the selected gateway
   const { data: addressLists = [], isLoading: isLoadingLists } = useQuery<string[]>({
-    queryKey: ['address-lists', importingRouter?.id],
+    queryKey: ['address-lists', importingGateway?.id],
     queryFn: async () => {
-      const { data } = await api.get(`/gateways/${importingRouter?.id}/address-lists`)
+      const { data } = await api.get(`/gateways/${importingGateway?.id}/address-lists`)
       return data
     },
-    enabled: !!importingRouter,
+    enabled: !!importingGateway,
   })
 
-  const { data: routers = [], isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['routers'],
-    queryFn: fetchRouters,
+  const { data: gateways = [], isLoading, isFetching, refetch } = useQuery({
+    queryKey: ['gateways'],
+    queryFn: fetchGateways,
     refetchInterval: 30_000, // polling cada 30 s
   })
 
   const deleteMutation = useMutation({
-    mutationFn: deleteRouter,
+    mutationFn: deleteGateway,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['routers'] })
+      queryClient.invalidateQueries({ queryKey: ['gateways'] })
       setConfirmDelete(null)
     },
   })
 
   const importMutation = useMutation({
-    mutationFn: async (payload: { routerId: string; listName: string }) => {
-      const { data } = await api.post(`/gateways/${payload.routerId}/import-clients`, null, {
+    mutationFn: async (payload: { gatewayId: string; listName: string }) => {
+      const { data } = await api.post(`/gateways/${payload.gatewayId}/import-clients`, null, {
         params: { list_name: payload.listName }
       })
       return data as { imported_count: number }
     },
     onSuccess: (data) => {
       alert(`Importación exitosa. Se importaron ${data.imported_count} nuevos clientes.`)
-      setImportingRouter(null)
-      queryClient.invalidateQueries({ queryKey: ['routers'] })
+      setImportingGateway(null)
+      queryClient.invalidateQueries({ queryKey: ['gateways'] })
     },
     onError: (err: unknown) => {
       const errorResponse = err as { response?: { data?: { detail?: string } } }
-      const msg = errorResponse?.response?.data?.detail || 'Error al importar clientes desde el router.'
+      const msg = errorResponse?.response?.data?.detail || 'Error al importar clientes desde el gateway.'
       alert(msg)
-      setImportingRouter(null)
+      setImportingGateway(null)
     }
   })
 
   const handleImportSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!importingRouter) return
+    if (!importingGateway) return
     const listName = selectedListName === 'custom' ? customListName.trim() : selectedListName
     if (!listName) return
-    importMutation.mutate({ routerId: importingRouter.id, listName })
+    importMutation.mutate({ gatewayId: importingGateway.id, listName })
   }
 
   const [selectedSiteId, setSelectedSiteId] = useState('')
@@ -118,20 +118,20 @@ export function GatewaysPage() {
     },
   })
 
-  const filteredRouters = routers.filter((r) => {
+  const filteredGateways = gateways.filter((gateway) => {
     if (selectedSiteId === '') return true
-    return r.site_id === selectedSiteId
+    return gateway.site_id === selectedSiteId
   })
 
-  const onlineCount = filteredRouters.filter((r) => r.status === 'online').length
-  const offlineCount = filteredRouters.filter((r) => r.status === 'offline').length
+  const onlineCount = filteredGateways.filter((gateway) => gateway.status === 'online').length
+  const offlineCount = filteredGateways.filter((gateway) => gateway.status === 'offline').length
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="flex items-center gap-3 text-muted-foreground">
           <RefreshCw className="w-5 h-5 animate-spin" />
-          <span>Cargando routers...</span>
+          <span>Cargando gateways...</span>
         </div>
       </div>
     )
@@ -142,11 +142,11 @@ export function GatewaysPage() {
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Routers</h1>
+          <h1 className="text-2xl font-bold text-foreground">Gateways</h1>
         </div>
         <div className="flex items-center gap-3">
           <button
-            id="refresh-routers"
+            id="refresh-gateways"
             onClick={() => refetch()}
             disabled={isFetching}
             className="btn-secondary"
@@ -156,12 +156,12 @@ export function GatewaysPage() {
           </button>
           {isAdmin && (
             <button
-              id="add-router"
+              id="add-gateway"
               onClick={() => { setEditingGateway(null); setDialogOpen(true) }}
               className="btn-primary"
             >
               <Plus className="w-4 h-4" />
-              Agregar router
+              Agregar gateway
             </button>
           )}
         </div>
@@ -170,10 +170,10 @@ export function GatewaysPage() {
       {/* ── Stats cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Total', value: filteredRouters.length, icon: Server, color: 'text-brand-400' },
+          { label: 'Total', value: filteredGateways.length, icon: Server, color: 'text-brand-400' },
           { label: 'En línea', value: onlineCount, icon: Wifi, color: 'text-emerald-400' },
           { label: 'Fuera de línea', value: offlineCount, icon: Wifi, color: 'text-red-400' },
-          { label: 'Desconocido', value: filteredRouters.length - onlineCount - offlineCount, icon: Clock, color: 'text-slate-400' },
+          { label: 'Desconocido', value: filteredGateways.length - onlineCount - offlineCount, icon: Clock, color: 'text-slate-400' },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="glass-card p-4">
             <div className="flex items-center justify-between mb-2">
@@ -185,18 +185,18 @@ export function GatewaysPage() {
         ))}
       </div>
 
-      {/* ── Tabla de routers ── */}
-      {routers.length === 0 ? (
+      {/* ── Tabla de gateways ── */}
+      {gateways.length === 0 ? (
         <div className="glass-card p-12 text-center">
           <Server className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-foreground mb-2">Sin routers registrados</h3>
+          <h3 className="text-lg font-semibold text-foreground mb-2">Sin gateways registrados</h3>
           <p className="text-muted-foreground text-sm mb-6">
-            Agrega tu primer router MikroTik para comenzar a gestionar tu red.
+            Agrega tu primer gateway MikroTik para comenzar a gestionar tu red.
           </p>
           {isAdmin && (
             <button onClick={() => setDialogOpen(true)} className="btn-primary mx-auto">
               <Plus className="w-4 h-4" />
-              Agregar primer router
+              Agregar primer gateway
             </button>
           )}
         </div>
@@ -210,7 +210,7 @@ export function GatewaysPage() {
             </div>
             <div className="w-full sm:w-64">
               <select
-                id="filter-router-site"
+                id="filter-gateway-site"
                 value={selectedSiteId}
                 onChange={(e) => setSelectedSiteId(e.target.value)}
                 className="input-field cursor-pointer font-medium"
@@ -225,12 +225,12 @@ export function GatewaysPage() {
             </div>
           </div>
 
-          {filteredRouters.length === 0 ? (
+          {filteredGateways.length === 0 ? (
             <div className="glass-card p-12 text-center">
               <Server className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-foreground mb-2">Sin routers en este sitio</h3>
+              <h3 className="text-lg font-semibold text-foreground mb-2">Sin gateways en este sitio</h3>
               <p className="text-muted-foreground text-sm">
-                No hay ningún router MikroTik asociado al sitio seleccionado.
+                No hay ningún gateway MikroTik asociado al sitio seleccionado.
               </p>
             </div>
           ) : (
@@ -238,7 +238,7 @@ export function GatewaysPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Router</th>
+                    <th>Gateway</th>
                     <th>Sitio</th>
                     <th className="hidden md:table-cell">IP / Host</th>
                     <th>Estado</th>
@@ -247,10 +247,10 @@ export function GatewaysPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRouters.map((router) => (
+                  {filteredGateways.map((gateway) => (
                     <tr
-                      key={router.id}
-                      onClick={() => navigate(`/gateways/${router.id}`)}
+                      key={gateway.id}
+                      onClick={() => navigate(`/gateways/${gateway.id}`)}
                       className="group cursor-pointer hover:bg-secondary/40 transition-colors"
                     >
                       <td>
@@ -259,17 +259,17 @@ export function GatewaysPage() {
                             <Server className="w-4 h-4 text-brand-400" />
                           </div>
                           <div>
-                            <p className="font-medium text-foreground text-sm">{router.nombre}</p>
-                            {router.modelo_hw && (
-                              <p className="text-xs text-muted-foreground">{router.modelo_hw}</p>
+                            <p className="font-medium text-foreground text-sm">{gateway.nombre}</p>
+                            {gateway.modelo_hw && (
+                              <p className="text-xs text-muted-foreground">{gateway.modelo_hw}</p>
                             )}
                           </div>
                         </div>
                       </td>
                       <td>
-                        {router.site_nombre ? (
+                        {gateway.site_nombre ? (
                           <span className="inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 border border-brand-500/20">
-                            {router.site_nombre}
+                            {gateway.site_nombre}
                           </span>
                         ) : (
                           <span className="text-xs text-muted-foreground italic">Sin Sitio</span>
@@ -277,20 +277,20 @@ export function GatewaysPage() {
                       </td>
                       <td className="hidden md:table-cell">
                         <code className="text-xs bg-secondary/50 px-2 py-1 rounded text-muted-foreground font-mono">
-                          {router.ip}:{router.puerto_api}
+                          {gateway.ip}:{gateway.puerto_api}
                         </code>
                       </td>
                       <td>
-                        <GatewayStatusBadge status={router.status ?? 'unknown'} />
+                        <GatewayStatusBadge status={gateway.status ?? 'unknown'} />
                       </td>
                       <td className="hidden lg:table-cell">
                         <span className="text-xs text-muted-foreground font-mono">
-                          {router.ros_version ?? '—'}
+                          {gateway.ros_version ?? '—'}
                         </span>
                       </td>
                       <td className="hidden lg:table-cell">
                         <span className="text-xs text-muted-foreground">
-                          {formatUptime(router.uptime)}
+                          {formatUptime(gateway.uptime)}
                         </span>
                       </td>
                     </tr>
@@ -306,9 +306,9 @@ export function GatewaysPage() {
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="glass-card p-6 w-full max-w-sm mx-4 animate-fade-in">
-            <h3 className="text-lg font-semibold text-foreground mb-2">¿Eliminar router?</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-2">¿Eliminar gateway?</h3>
             <p className="text-muted-foreground text-sm mb-6">
-              Esta acción desactivará el router. No se eliminan datos históricos.
+              Esta acción desactivará el gateway. No se eliminan datos históricos.
             </p>
             <div className="flex gap-3">
               <button
@@ -318,7 +318,7 @@ export function GatewaysPage() {
                 Cancelar
               </button>
               <button
-                id="confirm-delete-router"
+                id="confirm-delete-gateway"
                 onClick={() => deleteMutation.mutate(confirmDelete)}
                 disabled={deleteMutation.isPending}
                 className="btn-destructive flex-1 justify-center"
@@ -336,7 +336,7 @@ export function GatewaysPage() {
         onClose={() => { setDialogOpen(false); setEditingGateway(null) }}
         gateway={editingGateway}
         onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['routers'] })
+          queryClient.invalidateQueries({ queryKey: ['gateways'] })
           setDialogOpen(false)
           setEditingGateway(null)
         }}
@@ -344,7 +344,7 @@ export function GatewaysPage() {
       />
 
       {/* Modal Importar Clientes de Address-list */}
-      {importingRouter && (
+      {importingGateway && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="glass-card w-full max-w-md mx-4 animate-fade-in border border-border/50">
             <div className="flex items-center justify-between p-5 border-b border-border">
@@ -354,7 +354,7 @@ export function GatewaysPage() {
               </h2>
               <button
                 type="button"
-                onClick={() => setImportingRouter(null)}
+                onClick={() => setImportingGateway(null)}
                 className="text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -363,7 +363,7 @@ export function GatewaysPage() {
 
             <form onSubmit={handleImportSubmit} className="p-5 space-y-4">
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Selecciona una lista de direcciones del router <strong>{importingRouter.nombre}</strong>. Se importarán todas sus IPs y se registrarán como nuevos clientes en el sistema y en la lista <strong>clientes</strong> de MikroTik.
+                Selecciona una lista de direcciones del gateway <strong>{importingGateway.nombre}</strong>. Se importarán todas sus IPs y se registrarán como nuevos clientes en el sistema y en la lista <strong>clientes</strong> de MikroTik.
               </p>
 
               <div>
@@ -372,7 +372,7 @@ export function GatewaysPage() {
                 </label>
                 {isLoadingLists ? (
                   <div className="text-xs text-muted-foreground py-2 flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando listas del router...
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando listas del gateway...
                   </div>
                 ) : (
                   <select
@@ -417,7 +417,7 @@ export function GatewaysPage() {
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setImportingRouter(null)}
+                  onClick={() => setImportingGateway(null)}
                   className="btn-secondary flex-1 justify-center"
                 >
                   Cancelar
