@@ -224,6 +224,12 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
             detail="El router especificado no existe o está inactivo.",
         )
 
+    apellidos = (payload.apellidos or "").strip()
+    nombres = (payload.nombres or "").strip()
+    nombre = (payload.nombre or f"{apellidos} {nombres}".strip()).strip()
+    if not nombre:
+        nombre = f"{apellidos} {nombres}".strip()
+
     # Verificar cédula única
     exists = db.query(Client).filter(Client.cedula == payload.cedula).first()
     if exists:
@@ -315,9 +321,9 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
             )
 
     client = Client(
-        nombre=f"{payload.apellidos} {payload.nombres}".strip(),
-        apellidos=payload.apellidos,
-        nombres=payload.nombres,
+        nombre=nombre,
+        apellidos=apellidos,
+        nombres=nombres,
         cedula=payload.cedula,
         telefono=payload.telefono,
         direccion=payload.direccion,
@@ -444,6 +450,13 @@ def update_client(
 
     update_data = payload.model_dump(exclude_unset=True)
 
+    if "nombre" in update_data:
+        client.nombre = update_data.pop("nombre")
+    elif "apellidos" in update_data or "nombres" in update_data:
+        apellidos = update_data.get("apellidos", client.apellidos) or ""
+        nombres = update_data.get("nombres", client.nombres) or ""
+        client.nombre = f"{apellidos} {nombres}".strip()
+
     # Validar cédula única si cambia
     if "cedula" in update_data and update_data["cedula"] != client.cedula:
         exists = db.query(Client).filter(Client.cedula == update_data["cedula"]).first()
@@ -492,10 +505,10 @@ def update_client(
     if new_tipo == "static":
         ip_val = update_data.get("ip") if "ip" in update_data else old_ip
         if not ip_val:
-             raise HTTPException(
-                 status_code=status.HTTP_400_BAD_REQUEST,
-                 detail="La dirección IP es obligatoria para conexiones estáticas.",
-             )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La dirección IP es obligatoria para conexiones estáticas.",
+            )
 
         # Validar IP única en el router de destino
         if "ip" in update_data or "gateway_id" in update_data:

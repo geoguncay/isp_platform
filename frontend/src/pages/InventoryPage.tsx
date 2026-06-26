@@ -3,9 +3,10 @@
  */
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw, Search, Package, Edit2, Trash2, AlertTriangle, Truck, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, RefreshCw, Search, Package, Edit2, Trash2, AlertTriangle, Truck, ArrowUpDown, ArrowUp, ArrowDown, Upload } from 'lucide-react'
 import api from '@/services/api'
 import { InventoryFormDialog } from '@/components/InventoryFormDialog'
+import { InventoryImportDialog } from '@/components/InventoryImportDialog'
 
 interface Supplier {
   id: string
@@ -31,8 +32,9 @@ export function InventoryPage() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [formOpen, setFormOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
-  
+
   // Sorting State
   const [sortField, setSortField] = useState<'codigo' | 'nombre' | 'modelo' | 'categoria' | 'cantidad' | 'precio_compra' | 'precio_venta' | null>(null)
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
@@ -88,12 +90,12 @@ export function InventoryPage() {
     if (!sortField) return 0
     const aVal = a[sortField] ?? ''
     const bVal = b[sortField] ?? ''
-    
+
     if (sortField === 'cantidad' || sortField === 'precio_compra' || sortField === 'precio_venta') {
       return sortOrder === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal)
     }
-    
-    return sortOrder === 'asc' 
+
+    return sortOrder === 'asc'
       ? String(aVal).localeCompare(String(bVal))
       : String(bVal).localeCompare(String(aVal))
   })
@@ -114,6 +116,13 @@ export function InventoryPage() {
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             Actualizar
+          </button>
+          <button
+            onClick={() => setImportOpen(true)}
+            className="btn-secondary"
+          >
+            <Upload className="w-4 h-4" />
+            Importar
           </button>
           <button
             onClick={() => handleOpenForm()}
@@ -269,6 +278,12 @@ export function InventoryPage() {
         isOpen={formOpen}
         onClose={() => setFormOpen(false)}
         item={editingItem}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['inventory'] })}
+      />
+
+      <InventoryImportDialog
+        isOpen={importOpen}
+        onClose={() => setImportOpen(false)}
         onSuccess={() => queryClient.invalidateQueries({ queryKey: ['inventory'] })}
       />
     </div>

@@ -113,6 +113,13 @@ def run_migrations(bind_engine) -> None:
             conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS prorrateo_separado BOOLEAN DEFAULT TRUE;"))
             conn.execute(text("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS categoria VARCHAR(50);"))
             conn.execute(text("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS modelo VARCHAR(80);"))
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS product_categories (
+                id VARCHAR(36) PRIMARY KEY,
+                nombre VARCHAR(50) NOT NULL UNIQUE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            """))
 
             # Renombrar columna router_id → gateway_id en cada tabla relacionada
             conn.execute(text("""

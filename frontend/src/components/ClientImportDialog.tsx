@@ -2,7 +2,7 @@
  * ClientImportDialog — Modal Asistente para importar clientes desde un CSV.
  */
 import { useState, useEffect } from 'react'
-import { X, Loader2, Upload, FileSpreadsheet, ArrowRight, AlertTriangle, CheckCircle, HelpCircle, RefreshCw } from 'lucide-react'
+import { X, Loader2, Upload, FileSpreadsheet, ArrowRight, AlertTriangle, CheckCircle, HelpCircle, Download } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import api from '@/services/api'
 
@@ -402,30 +402,32 @@ export function ClientImportDialog({ isOpen, onClose, onSuccess }: ClientImportD
                 />
                 <Upload className="w-12 h-12 text-muted-foreground group-hover:text-brand-400 transition-colors mb-4" />
                 <p className="text-sm font-semibold text-foreground mb-1">
-                  Selecciona o arrastra tu archivo CSV
+                  Arrastra tu archivo CSV aquí
                 </p>
                 <p className="text-xs text-muted-foreground text-center max-w-sm px-4">
-                  Asegúrate de que tu archivo esté separado por comas (CSV) y codificado en UTF-8.
+                  o haz clic para seleccionar el archivo
                 </p>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4 items-center justify-between p-4 bg-secondary/20 border border-border/60 rounded-xl">
-                <div className="text-left">
-                  <h4 className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-1.5">
-                    <FileSpreadsheet className="w-4 h-4 text-brand-400" /> Plantilla de Importación
-                  </h4>
-                  <p className="text-[11px] text-muted-foreground mt-1 max-w-md">
-                    Descarga nuestra plantilla estructurada con ejemplos prácticos para asegurar que tus datos tengan el formato requerido por la plataforma.
-                  </p>
-                </div>
-                <button
+                <div className="flex items-start gap-3">
+                  <Download className="w-4 h-4 text-brand-400" />
+                    <div className="text-left">
+                      <p className="text-sm font-semibold text-foreground mb-1">Plantilla CSV</p>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        Descarga nuestra plantilla estructurada con ejemplos prácticos para asegurar que tus datos tengan el formato requerido por la plataforma.
+                      </p>
+                  </div>
+                  <button
                   type="button"
                   onClick={downloadTemplate}
                   className="btn-secondary w-full sm:w-auto px-4 py-2 shrink-0 flex items-center justify-center gap-1.5 cursor-pointer"
                 >
-                  <Upload className="w-4 h-4 rotate-180" />
+                  <Download className="w-3.5 h-3.5" />
                   Descargar Plantilla CSV
                 </button>
+                </div>
+
               </div>
             </div>
           )}

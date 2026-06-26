@@ -3,7 +3,7 @@ Schemas Pydantic v2 para Clientes y asignación de Planes.
 """
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from app.core.validators import validate_ecuadorian_cedula
 from app.schemas.plan import PlanResponse
@@ -14,14 +14,14 @@ from app.schemas.custom_service import CustomServiceResponse
 
 class ClientBase(BaseModel):
     nombre: str | None = Field(default=None, max_length=120)
-    apellidos: str = Field(min_length=2, max_length=60)
-    nombres: str = Field(min_length=2, max_length=60)
+    apellidos: str | None = Field(default=None, max_length=60)
+    nombres: str | None = Field(default=None, max_length=60)
     cedula: str = Field(min_length=10, max_length=20)
     telefono: str = Field(min_length=5, max_length=40)
     direccion: str = Field(min_length=5, max_length=255)
     latitud: float | None = None
     longitud: float | None = None
-    gateway_id: uuid.UUID
+    gateway_id: uuid.UUID = Field(validation_alias=AliasChoices("gateway_id", "router_id"))
     tipo: str = Field(default="static")  # "static" o "pppoe"
     email: str | None = Field(default=None, max_length=100)
     inicio_facturacion: datetime | None = None
@@ -60,16 +60,16 @@ class ClientCreate(ClientBase):
 
 
 class ClientUpdate(BaseModel):
-    nombre: str | None = Field(default=None, min_length=2, max_length=120)
-    apellidos: str | None = Field(default=None, min_length=2, max_length=60)
-    nombres: str | None = Field(default=None, min_length=2, max_length=60)
+    nombre: str | None = Field(default=None, max_length=120)
+    apellidos: str | None = Field(default=None, max_length=60)
+    nombres: str | None = Field(default=None, max_length=60)
     custom_service_ids: list[uuid.UUID] | None = None
     cedula: str | None = Field(default=None, min_length=10, max_length=20)
     telefono: str | None = Field(default=None, min_length=5, max_length=40)
     direccion: str | None = Field(default=None, min_length=5, max_length=255)
     latitud: float | None = None
     longitud: float | None = None
-    gateway_id: uuid.UUID | None = None
+    gateway_id: uuid.UUID | None = Field(default=None, validation_alias=AliasChoices("gateway_id", "router_id"))
     tipo: str | None = None
     activo: bool | None = None
     email: str | None = Field(default=None, max_length=100)

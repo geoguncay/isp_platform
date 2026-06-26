@@ -2,11 +2,16 @@
  * InventoryFormDialog — Modal para crear y editar artículos de inventario.
  */
 import React, { useState, useEffect } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { X, Loader2, Save, Package } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { X, Loader2, Save, Package, Edit2, Plus, Check } from 'lucide-react'
 import api from '@/services/api'
 
 interface Supplier {
+  id: string
+  nombre: string
+}
+
+interface ProductCategory {
   id: string
   nombre: string
 }
@@ -34,6 +39,7 @@ interface InventoryFormDialogProps {
 }
 
 export function InventoryFormDialog({ isOpen, onClose, item, onSuccess }: InventoryFormDialogProps) {
+  const queryClient = useQueryClient()
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   // Form State
@@ -48,20 +54,38 @@ export function InventoryFormDialog({ isOpen, onClose, item, onSuccess }: Invent
   const [modelo, setModelo] = useState('')
   const [proveedorId, setProveedorId] = useState('')
 
-  // Query suppliers list for dropdown mapping
+  // Category inline state
+  const [categoryInput, setCategoryInput] = useState('')
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
+  const [categoryEditName, setCategoryEditName] = useState('')
+
+  // Query suppliers list
   const { data: suppliers = [] } = useQuery<Supplier[]>({
     queryKey: ['suppliers-list-dropdown'],
     queryFn: async () => {
       const { data } = await api.get('/suppliers')
       return data
     },
-    enabled: isOpen
+    enabled: isOpen,
+  })
+
+  // Query categories list
+  const { data: categories = [] } = useQuery<ProductCategory[]>({
+    queryKey: ['inventory-categories'],
+    queryFn: async () => {
+      const { data } = await api.get('/inventory/categories')
+      return data
+    },
+    enabled: isOpen,
   })
 
   // Synchronize state when modal opens or editing item changes
   useEffect(() => {
     if (isOpen) {
       setErrorMsg(null)
+      setCategoryInput('')
+      setEditingCategoryId(null)
+      setCategoryEditName('')
       if (item) {
         setNombre(item.nombre)
         setCodigo(item.codigo)
@@ -88,6 +112,39 @@ export function InventoryFormDialog({ isOpen, onClose, item, onSuccess }: Invent
     }
   }, [isOpen, item])
 
+  // Create category mutation
+  const createCategoryMutation = useMutation({
+    mutationFn: async (nombre: string) => {
+      const { data } = await api.post('/inventory/categories', { nombre })
+      return data as ProductCategory
+    },
+    onSuccess: (newCat) => {
+      queryClient.invalidateQueries({ queryKey: ['inventory-categories'] })
+      setCategoria(newCat.nombre)
+      setCategoryInput('')
+    },
+    onError: (err: any) => {
+      setErrorMsg(err.response?.data?.detail ?? 'Error al crear la categoría')
+    },
+  })
+
+  // Update category mutation
+  const updateCategoryMutation = useMutation({
+    mutationFn: async ({ id, nombre }: { id: string; nombre: string }) => {
+      const { data } = await api.put(`/inventory/categories/${id}`, { nombre })
+      return data as ProductCategory
+    },
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ['inventory-categories'] })
+      setCategoria(updated.nombre)
+      setEditingCategoryId(null)
+      setCategoryEditName('')
+    },
+    onError: (err: any) => {
+      setErrorMsg(err.response?.data?.detail ?? 'Error al renombrar la categoría')
+    },
+  })
+
   // Save mutation
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -99,7 +156,7 @@ export function InventoryFormDialog({ isOpen, onClose, item, onSuccess }: Invent
         precio_compra: parseFloat(precioCompra) || 0.0,
         precio_venta: parseFloat(precioVenta) || 0.0,
         descripcion: descripcion.trim() || null,
-        categoria: categoria || null,
+        categoria: categoria === '__new__' ? null : (categoria || null),
         modelo: modelo.trim() || null,
         proveedor_id: proveedorId || null,
       }
@@ -115,7 +172,7 @@ export function InventoryFormDialog({ isOpen, onClose, item, onSuccess }: Invent
     },
     onError: (err: any) => {
       setErrorMsg(err.response?.data?.detail ?? 'Error al guardar el producto')
-    }
+    },
   })
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -126,6 +183,15 @@ export function InventoryFormDialog({ isOpen, onClose, item, onSuccess }: Invent
     }
     saveMutation.mutate()
   }
+
+  const handleCategorySelectChange = (value: string) => {
+    setCategoria(value)
+    setCategoryInput('')
+    setEditingCategoryId(null)
+    setCategoryEditName('')
+  }
+
+  const selectedCategory = categories.find(c => c.nombre === categoria)
 
   if (!isOpen) return null
 
@@ -259,25 +325,125 @@ export function InventoryFormDialog({ isOpen, onClose, item, onSuccess }: Invent
 
           {/* Categoría y Proveedor */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Categoría con creación/edición inline */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
                 Categoría del Producto
               </label>
-              <select
-                value={categoria}
-                onChange={(e) => setCategoria(e.target.value)}
-                className="input-field cursor-pointer text-sm"
-              >
-                <option value="">-- Seleccionar Categoría --</option>
-                <option value="Router">Router</option>
-                <option value="Antena">Antena</option>
-                <option value="ONT">ONT</option>
-                <option value="ONU">ONU</option>
-                <option value="Cable">Cable</option>
-                <option value="Consumible">Consumible</option>
-                <option value="Herramienta">Herramienta</option>
-                <option value="Otro">Otro</option>
-              </select>
+
+              {/* Select row */}
+              <div className="flex gap-2">
+                <select
+                  value={categoria}
+                  onChange={(e) => handleCategorySelectChange(e.target.value)}
+                  className="input-field cursor-pointer text-sm flex-1"
+                >
+                  <option value="">Sin Categoría</option>
+                  {/* Preserve unknown legacy category name */}
+                  {categoria && categoria !== '__new__' && !categories.some(c => c.nombre === categoria) && (
+                    <option value={categoria}>{categoria}</option>
+                  )}
+                  {categories.map(c => (
+                    <option key={c.id} value={c.nombre}>{c.nombre}</option>
+                  ))}
+                  <option value="__new__">+ Crear nueva categoría...</option>
+                </select>
+
+                {/* Edit button — only when an API-known category is selected */}
+                {selectedCategory && !editingCategoryId && (
+                  <button
+                    type="button"
+                    title="Editar nombre de categoría"
+                    onClick={() => {
+                      setEditingCategoryId(selectedCategory.id)
+                      setCategoryEditName(selectedCategory.nombre)
+                    }}
+                    className="p-2 border border-border hover:bg-secondary rounded-lg text-muted-foreground hover:text-brand-400 transition-colors"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* New category input */}
+              {categoria === '__new__' && (
+                <div className="flex gap-2 items-center">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={categoryInput}
+                    onChange={(e) => setCategoryInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (categoryInput.trim()) createCategoryMutation.mutate(categoryInput.trim())
+                      }
+                    }}
+                    placeholder="Nombre de la nueva categoría..."
+                    className="input-field flex-1 text-sm"
+                  />
+                  <button
+                    type="button"
+                    disabled={!categoryInput.trim() || createCategoryMutation.isPending}
+                    onClick={() => categoryInput.trim() && createCategoryMutation.mutate(categoryInput.trim())}
+                    className="px-3 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                  >
+                    {createCategoryMutation.isPending
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <Plus className="w-3.5 h-3.5" />}
+                    Agregar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setCategoria(''); setCategoryInput('') }}
+                    className="p-2 hover:bg-secondary rounded-lg text-muted-foreground transition-colors shrink-0"
+                    title="Cancelar"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Edit category name inline */}
+              {editingCategoryId && (
+                <div className="flex gap-2 items-center">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={categoryEditName}
+                    onChange={(e) => setCategoryEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (categoryEditName.trim()) {
+                          updateCategoryMutation.mutate({ id: editingCategoryId, nombre: categoryEditName.trim() })
+                        }
+                      }
+                    }}
+                    className="input-field flex-1 text-sm"
+                    placeholder="Nuevo nombre..."
+                  />
+                  <button
+                    type="button"
+                    disabled={!categoryEditName.trim() || updateCategoryMutation.isPending}
+                    onClick={() => categoryEditName.trim() && updateCategoryMutation.mutate({ id: editingCategoryId, nombre: categoryEditName.trim() })}
+                    className="px-3 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                  >
+                    {updateCategoryMutation.isPending
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <Check className="w-3.5 h-3.5" />}
+                    Guardar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setEditingCategoryId(null); setCategoryEditName('') }}
+                    className="p-2 hover:bg-secondary rounded-lg text-muted-foreground transition-colors shrink-0"
+                    title="Cancelar"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="space-y-1.5">

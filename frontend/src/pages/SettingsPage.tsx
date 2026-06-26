@@ -861,100 +861,6 @@ export function SettingsPage() {
           {activeTab === 'gateway' && (
             <div className="space-y-4">
 
-              {/* ── Sección: Conectividad por Defecto ─────────────────────────── */}
-              <div className="glass-card p-6 space-y-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                    <SlidersHorizontal className="w-5 h-5 text-brand-400" />
-                    Conectividad por Defecto
-                  </h3>
-                  <p className="text-muted-foreground text-xs mt-1">
-                    Credenciales y puertos que se auto-completarán al registrar nuevos routers MikroTik.
-                  </p>
-                </div>
-
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    const target = e.currentTarget as any
-                    localStorage.setItem('wisp_default_puerto_api', target.puerto.value)
-                    localStorage.setItem('wisp_default_usuario_api', target.usuario.value)
-                    localStorage.setItem('wisp_default_password_api', target.password.value)
-                    localStorage.setItem('wisp_default_monitoreo_trafico', target.monitoreo.checked ? 'true' : 'false')
-                    localStorage.setItem('wisp_default_control_velocidad', target.control.checked ? 'true' : 'false')
-                    setStatusMessage({ type: 'success', text: 'Valores de conectividad guardados exitosamente.' })
-                  }}
-                  className="space-y-4"
-                >
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
-                        Puerto API
-                      </label>
-                      <input
-                        name="puerto"
-                        type="number"
-                        defaultValue={localStorage.getItem('wisp_default_puerto_api') || '8728'}
-                        className="input-field font-mono"
-                        placeholder="8728"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
-                        Usuario API
-                      </label>
-                      <input
-                        name="usuario"
-                        type="text"
-                        defaultValue={localStorage.getItem('wisp_default_usuario_api') || 'admin'}
-                        className="input-field"
-                        placeholder="admin"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
-                        Contraseña API
-                      </label>
-                      <input
-                        name="password"
-                        type="password"
-                        defaultValue={localStorage.getItem('wisp_default_password_api') || ''}
-                        className="input-field"
-                        placeholder="••••••••"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="pt-1 space-y-3">
-                    <label className="flex items-center gap-3 cursor-pointer select-none">
-                      <input
-                        name="monitoreo"
-                        type="checkbox"
-                        defaultChecked={(localStorage.getItem('wisp_default_monitoreo_trafico') || 'true') === 'true'}
-                        className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 bg-secondary/50 border-border"
-                      />
-                      <span className="text-sm font-medium text-foreground">Habilitar Monitoreo de Tráfico por defecto</span>
-                    </label>
-                    <label className="flex items-center gap-3 cursor-pointer select-none">
-                      <input
-                        name="control"
-                        type="checkbox"
-                        defaultChecked={(localStorage.getItem('wisp_default_control_velocidad') || 'true') === 'true'}
-                        className="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 bg-secondary/50 border-border"
-                      />
-                      <span className="text-sm font-medium text-foreground">Habilitar Control de Velocidad por defecto</span>
-                    </label>
-                  </div>
-
-                  <div className="flex justify-end pt-4 border-t border-border/50">
-                    <button type="submit" className="btn-primary">
-                      <Save className="w-4 h-4" />
-                      Guardar Conectividad
-                    </button>
-                  </div>
-                </form>
-              </div>
-
               {/* ── Sección: Colas Padre ───────────────────────────────────────── */}
               <div className="glass-card p-6 space-y-5">
                 <div>
@@ -1148,8 +1054,50 @@ export function SettingsPage() {
                   </div>
                 )}
               </div>
+              {/* ── Sección: Nombre de Sitio ─────────────────────────────────────── */}
+              <div className="glass-card p-6 space-y-5">
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <Building className="w-5 h-5 text-brand-400" />
+                    Nombre de Sitio
+                  </h3>
+                  <p className="text-muted-foreground text-xs mt-1">
+                    Nombre del sitio que se mostrará en la Zona de Clientes.
+                  </p>
+                </div>
 
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    const target = e.currentTarget as any
+                    localStorage.setItem('wisp_site_name', target.siteName.value)
+                    setStatusMessage({ type: 'success', text: 'Nombre del sitio guardado exitosamente.' })
+                  }}
+                  className="space-y-4"
+                >
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
+                      Nombre del Sitio
+                    </label>
+                    <input
+                      name="siteName"
+                      type="text"
+                      defaultValue={localStorage.getItem('wisp_site_name') || 'Nombre del Sitio'}
+                      className="input-field"
+                      placeholder="Nombre del Sitio"
+                    />
+                  </div>
+
+                  <div className="flex justify-end pt-4 border-t border-border/50">
+                    <button type="submit" className="btn-primary">
+                      <Save className="w-4 h-4" />
+                      Guardar Nombre del Sitio
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
+
           )}
 
           {/* ── Tab Content: Facturación ─────────────────────────────────────────── */}
