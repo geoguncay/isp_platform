@@ -1,12 +1,12 @@
 /**
  * GatewayFormDialog — Modal para crear y editar gateways con test de conexión y mapa interactivo.
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useForm, Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { X, Loader2, CheckCircle2, XCircle, Plug, Eye, EyeOff, Trash2, MapPin, Server, Key, Activity, Check, Router as GatewayIcon, Hash } from 'lucide-react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { X, Loader2, CheckCircle2, XCircle, Plug, Eye, EyeOff, Trash2, MapPin, Server, Key, Activity, Router as GatewayIcon, Hash, Plus } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -49,10 +49,8 @@ const gatewaySchema = z.object({
   ancho_banda_up: z.coerce.number().min(0).default(0),
   ancho_banda_down: z.coerce.number().min(0).default(0),
   site_id: z.string().optional().nullable(),
-  new_site_nombre: z.string().max(120).optional().nullable(),
 }).refine(
   (data) => {
-    // La contraseña es obligatoria solo si es un gateway nuevo (no hay id)
     if (!data.id && (!data.password_api || data.password_api.trim() === '')) {
       return false
     }
@@ -62,21 +60,16 @@ const gatewaySchema = z.object({
     message: 'Requerido',
     path: ['password_api'],
   }
-).refine(
-  (data) => {
-    // Si site_id es 'new', new_site_nombre es obligatorio
-    if (data.site_id === 'new' && (!data.new_site_nombre || data.new_site_nombre.trim() === '')) {
-      return false
-    }
-    return true
-  },
-  {
-    message: 'Ingrese el nombre del nuevo sitio',
-    path: ['new_site_nombre'],
-  }
 )
 
 type GatewayFormData = z.infer<typeof gatewaySchema>
+
+interface Site {
+  id: string
+  nombre: string
+  latitud?: number | null
+  longitud?: number | null
+}
 
 interface GatewayFormDialogProps {
   open: boolean
@@ -117,11 +110,25 @@ interface TestResult {
 
 export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete }: GatewayFormDialogProps) {
   const isEdit = !!gateway
+  const queryClient = useQueryClient()
   const [testResult, setTestResult] = useState<TestResult | null>(null)
   const [isTesting, setIsTesting] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [tab, setTab] = useState<'info' | 'credentials' | 'services'>('info')
+
+  // Site selector state
+  const [siteSelectorValue, setSiteSelectorValue] = useState<string>('')
+  const [siteMode, setSiteMode] = useState<'normal' | 'create'>('normal')
+  const [siteInput, setSiteInput] = useState('')
+  const [siteInputLat, setSiteInputLat] = useState('')
+  const [siteInputLng, setSiteInputLng] = useState('')
+  const [siteError, setSiteError] = useState<string | null>(null)
+
+  // Map fly-to target (separate from gateway coords)
+  const [mapFlyTarget, setMapFlyTarget] = useState<[number, number] | null>(null)
 
   // Consultar lista de Sitios
-  const { data: sites = [] } = useQuery<any[]>({
+  const { data: sites = [] } = useQuery<Site[]>({
     queryKey: ['sites-list'],
     queryFn: async () => {
       const { data } = await api.get('/sites')
@@ -129,8 +136,6 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
     },
     enabled: open,
   })
-  const [showPassword, setShowPassword] = useState(false)
-  const [step, setStep] = useState<1 | 2 | 3>(1)
 
   const {
     register,
@@ -175,9 +180,19 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
     }
   }, [setValue])
 
+  const resetSiteState = (siteId: string = '') => {
+    setSiteSelectorValue(siteId)
+    setSiteMode('normal')
+    setSiteInput('')
+    setSiteInputLat('')
+    setSiteInputLng('')
+    setSiteError(null)
+    setMapFlyTarget(null)
+  }
+
   useEffect(() => {
     if (open) {
-      setStep(1)
+      setTab('info')
       setTestResult(null)
       setShowPassword(false)
       if (gateway) {
@@ -200,9 +215,9 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
           address_list: gateway.address_list ?? '',
           ancho_banda_up: gateway.ancho_banda_up ?? 0,
           ancho_banda_down: gateway.ancho_banda_down ?? 0,
-          site_id: gateway.site_id ?? '',
-          new_site_nombre: '',
+          site_id: gateway.site_id ?? null,
         })
+        resetSiteState(gateway.site_id ?? '')
       } else {
         const savedPuerto = localStorage.getItem('wisp_default_puerto_api')
         const savedUsuario = localStorage.getItem('wisp_default_usuario_api')
@@ -228,9 +243,9 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
           ancho_banda_down: 0,
           cola_padre: '',
           address_list: savedAddressList || '',
-          site_id: '',
-          new_site_nombre: '',
+          site_id: null,
         })
+        resetSiteState()
         handleGetLocation()
       }
     }
@@ -238,7 +253,6 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
 
   // Preseleccionar la primera cola padre y address list disponible al crear un nuevo gateway
   const nombreVal = watch('nombre')
-  const selectedSiteId = watch('site_id')
 
   useEffect(() => {
     if (!isEdit && nombreVal) {
@@ -256,25 +270,73 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
     }
   }, [nombreVal, isEdit, setValue])
 
+  // Site mutations
+  const createSiteMutation = useMutation({
+    mutationFn: async (payload: { nombre: string; latitud?: number | null; longitud?: number | null }) => {
+      const { data } = await api.post('/sites', payload)
+      return data as Site
+    },
+    onSuccess: (newSite) => {
+      queryClient.invalidateQueries({ queryKey: ['sites-list'] })
+      setSiteSelectorValue(newSite.id)
+      setValue('site_id', newSite.id)
+      setSiteMode('normal')
+      setSiteInput('')
+      setSiteInputLat('')
+      setSiteInputLng('')
+      setSiteError(null)
+      if (newSite.latitud && newSite.longitud) {
+        setMapFlyTarget([newSite.latitud, newSite.longitud])
+      }
+    },
+    onError: (err: any) => {
+      setSiteError(err.response?.data?.detail ?? 'Error al crear el sitio')
+    },
+  })
+
+  const handleSiteSelectChange = (val: string) => {
+    setSiteError(null)
+    if (val === '__new__') {
+      setSiteSelectorValue('__new__')
+      setSiteMode('create')
+      setSiteInput('')
+      setSiteInputLat(latVal ? String(latVal) : '')
+      setSiteInputLng(lngVal ? String(lngVal) : '')
+      setValue('site_id', null)
+    } else {
+      setSiteSelectorValue(val)
+      setSiteMode('normal')
+      setValue('site_id', val || null)
+      if (val) {
+        const site = sites.find(s => s.id === val)
+        if (site?.latitud && site?.longitud) {
+          setValue('latitud', site.latitud)
+          setValue('longitud', site.longitud)
+          setMapFlyTarget([site.latitud, site.longitud])
+        }
+      }
+    }
+  }
+
+  const handleCreateSite = () => {
+    if (!siteInput.trim()) return
+    createSiteMutation.mutate({
+      nombre: siteInput.trim(),
+      latitud: siteInputLat ? parseFloat(siteInputLat) : null,
+      longitud: siteInputLng ? parseFloat(siteInputLng) : null,
+    })
+  }
+
   const saveMutation = useMutation({
     mutationFn: async (data: GatewayFormData) => {
-      const payload = { ...data }
+      const payload: any = { ...data }
       delete payload.id
       if (isEdit && !payload.password_api) {
         delete payload.password_api
       }
-      if (payload.latitud === 0 || isNaN(Number(payload.latitud))) payload.latitud = null
-      if (payload.longitud === 0 || isNaN(Number(payload.longitud))) payload.longitud = null
-
-      // Saneamiento de campos de Sitios
-      if (payload.site_id === 'new') {
-        payload.site_id = null
-      } else {
-        payload.new_site_nombre = null
-      }
-      if (payload.site_id === '') {
-        payload.site_id = null
-      }
+      if (!payload.latitud || isNaN(Number(payload.latitud))) payload.latitud = null
+      if (!payload.longitud || isNaN(Number(payload.longitud))) payload.longitud = null
+      if (!payload.site_id) payload.site_id = null
 
       if (isEdit) {
         await api.put(`/gateways/${gateway!.id}`, payload)
@@ -286,7 +348,6 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
   })
 
   const handleTest = async () => {
-    // Validamos únicamente los campos requeridos para la prueba de conexión
     const isValid = await trigger(['ip', 'puerto_api', 'usuario_api', 'password_api'])
     if (!isValid) return
 
@@ -325,37 +386,48 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
     return null
   }
 
-  // Componente interno para sincronizar la vista del mapa cuando cambian las coordenadas
-  function MapController({ center }: { center: [number, number] }) {
+  // Componente interno para sincronizar la vista del mapa con coordenadas del gateway
+  // y hacer fly-to cuando se selecciona un sitio con coordenadas
+  function MapController({ center, flyTarget }: { center: [number, number]; flyTarget: [number, number] | null }) {
     const map = useMap()
+    const lastFlyKey = useRef('')
+
     useEffect(() => {
-      if (center && center[0] !== DEFAULT_CENTER[0] && center[1] !== DEFAULT_CENTER[1]) {
+      if (center[0] !== DEFAULT_CENTER[0] || center[1] !== DEFAULT_CENTER[1]) {
         map.setView(center, map.getZoom())
       }
     }, [center, map])
+
+    useEffect(() => {
+      if (flyTarget) {
+        const key = `${flyTarget[0].toFixed(6)},${flyTarget[1].toFixed(6)}`
+        if (key !== lastFlyKey.current) {
+          lastFlyKey.current = key
+          map.flyTo(flyTarget, 14, { duration: 1.0 })
+        }
+      }
+    }, [flyTarget, map])
+
     return null
   }
 
   const onFormError = (errors: Record<string, unknown>) => {
     const errorKeys = Object.keys(errors)
     if (errorKeys.includes('nombre')) {
-      setStep(1)
+      setTab('info')
       return
     }
-    const step2Fields = ['ip', 'puerto_api', 'usuario_api', 'password_api']
-    const hasStep2Error = errorKeys.some((key) => step2Fields.includes(key))
-    if (hasStep2Error) {
-      setStep(2)
+    const credentialFields = ['ip', 'puerto_api', 'usuario_api', 'password_api']
+    const hasCredentialError = errorKeys.some((key) => credentialFields.includes(key))
+    if (hasCredentialError) {
+      setTab('credentials')
       return
     }
   }
 
   if (!open) return null
 
-  // Coordenadas iniciales para render del Marker
   const mapCenter: [number, number] = latVal && lngVal ? [latVal, lngVal] : DEFAULT_CENTER
-
-
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -364,7 +436,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
         <div className="flex items-center justify-between p-5 border-b border-border">
           <div>
             <h2 className="text-lg font-semibold text-foreground">
-              {isEdit ? `Editar: ${gateway!.nombre}` : 'Agregar gateway'}
+              {isEdit ? `Editar: ${gateway!.nombre}` : 'Agregar Gateway'}
             </h2>
           </div>
           <button
@@ -376,69 +448,47 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
           </button>
         </div>
 
-        {/* Stepper */}
-        <div className="px-6 py-4 bg-secondary/20 border-b border-border/50">
-          <div className="flex items-center w-full max-w-3xl mx-auto justify-between relative">
-            {/* Línea de fondo */}
-            <div className="absolute top-5 left-0 right-0 h-0.5 bg-border -translate-y-1/2 z-0" />
-            <div
-              className="absolute top-5 left-0 h-0.5 bg-brand-500 transition-all duration-300 -translate-y-1/2 z-0"
-              style={{ width: step === 1 ? '0%' : step === 2 ? '50%' : '100%' }}
-            />
-
-            {/* Paso 1 */}
+        {/* Tab Navigation */}
+        <div className="border-b border-border bg-secondary/10">
+          <div className="flex overflow-x-auto">
             <button
               type="button"
-              onClick={() => setStep(1)}
-              className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
+              onClick={() => setTab('info')}
+              className={`px-5 py-3 text-sm font-medium flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                tab === 'info'
+                  ? 'border-brand-500 text-brand-400'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step >= 1
-                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
-                : 'bg-secondary border-border text-muted-foreground'
-                }`}>
-                {step > 1 ? <Check className="w-5 h-5" /> : <Server className="w-5 h-5" />}
-              </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 1 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-                }`}>
-                1. Información y Ubicación
-              </span>
+              <Server className="w-4 h-4" />
+              Información y Ubicación
             </button>
-
-            {/* Paso 2 */}
             <button
               type="button"
-              onClick={() => setStep(2)}
-              className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
+              onClick={() => setTab('credentials')}
+              className={`px-5 py-3 text-sm font-medium flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                tab === 'credentials'
+                  ? 'border-brand-500 text-brand-400'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
             >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step >= 2
-                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
-                : 'bg-secondary border-border text-muted-foreground'
-                }`}>
-                {step > 2 ? <Check className="w-5 h-5" /> : <Key className="w-5 h-5" />}
-              </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 2 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-                }`}>
-                2. Credenciales y Test
-              </span>
+              <Key className="w-4 h-4" />
+              Credenciales y Test
             </button>
-
-            {/* Paso 3 */}
-            <button
-              type="button"
-              onClick={() => setStep(3)}
-              className="relative z-10 flex flex-col items-center group cursor-pointer focus:outline-none"
-            >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-300 ${step === 3
-                ? 'bg-brand-500 border-brand-500 text-white shadow-lg shadow-brand-500/20'
-                : 'bg-secondary border-border text-muted-foreground'
-                }`}>
-                <Activity className="w-5 h-5" />
-              </div>
-              <span className={`text-[11px] font-semibold mt-1.5 transition-colors ${step === 3 ? 'text-brand-400 font-bold' : 'text-muted-foreground'
-                }`}>
-                3. Servicios y Monitoreo
-              </span>
-            </button>
+            {isEdit && (
+              <button
+                type="button"
+                onClick={() => setTab('services')}
+                className={`px-5 py-3 text-sm font-medium flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                  tab === 'services'
+                    ? 'border-brand-500 text-brand-400'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Activity className="w-4 h-4" />
+                Servicios y Monitoreo
+              </button>
+            )}
           </div>
         </div>
 
@@ -448,8 +498,8 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
           onSubmit={handleSubmit((data) => saveMutation.mutate(data), onFormError)}
           className="p-5 space-y-4"
         >
-          {/* PASO 1: INFORMACIÓN Y UBICACIÓN */}
-          {step === 1 && (
+          {/* TAB: INFORMACIÓN Y UBICACIÓN */}
+          {tab === 'info' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
               {/* Columna Izquierda: Formulario */}
               <div className="space-y-4">
@@ -457,7 +507,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                   <Server className="w-4 h-4" /> Especificaciones del Gateway
                 </div>
 
-                 {/* Nombre */}
+                {/* Nombre */}
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-1.5">
                     Nombre del gateway *
@@ -465,58 +515,16 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                   <input
                     id="gateway-nombre"
                     type="text"
-                    placeholder="Gateway Principal Quito"
+                    placeholder="Gateway Principal"
                     {...register('nombre')}
                     className="input-field"
                   />
                   {errors.nombre && <p className="text-xs text-destructive mt-1">{errors.nombre.message}</p>}
                 </div>
-
-                {/* Sitio / Ubicación */}
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-1.5">
-                    Sitio / Ubicación
-                  </label>
-                  <select
-                    id="gateway-site"
-                    {...register('site_id')}
-                    className="input-field cursor-pointer font-medium"
-                  >
-                    <option value="">Sin Sitio (General)</option>
-                    {sites.map((site: any) => (
-                      <option key={site.id} value={site.id}>
-                        {site.nombre}
-                      </option>
-                    ))}
-                    <option value="new">+ Crear nuevo sitio...</option>
-                  </select>
-                </div>
-
-                {/* Nuevo Sitio Campo de texto (Condicional) */}
-                {selectedSiteId === 'new' && (
-                  <div className="animate-fade-in space-y-1">
-                    <label className="block text-xs font-semibold text-brand-400">
-                      Nombre del nuevo sitio *
-                    </label>
-                    <input
-                      id="gateway-new-site"
-                      type="text"
-                      placeholder="Ej. Torre Central, Nodo Norte"
-                      {...register('new_site_nombre')}
-                      className="input-field"
-                    />
-                    {errors.new_site_nombre && (
-                      <p className="text-xs text-destructive mt-1">
-                        {errors.new_site_nombre.message}
-                      </p>
-                    )}
-                  </div>
-                )}
-
                 {/* Modelo HW (opcional) */}
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-1.5">
-                    Modelo hardware <span className="text-muted-foreground text-xs">(opcional)</span>
+                    Modelo hardware
                   </label>
                   <input
                     id="gateway-model"
@@ -526,8 +534,102 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                     className="input-field"
                   />
                 </div>
+                {/* Sitio / Ubicación */}
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1.5 flex items-center gap-1.5">
+                    Sitio / Ubicación
+                  </label>
 
-                {/* Coordenadas GPS (Inputs manuales) */}
+                  {/* Select row */}
+                  <div className="flex gap-2">
+                    <select
+                      id="gateway-site"
+                      aria-label="Sitio o ubicación del gateway"
+                      title="Sitio o ubicación del gateway"
+                      value={siteSelectorValue}
+                      onChange={(e) => handleSiteSelectChange(e.target.value)}
+                      className="input-field cursor-pointer font-medium flex-1"
+                    >
+                      <option value="">Sin Sitio (General)</option>
+                      {sites.map((site) => (
+                        <option key={site.id} value={site.id}>
+                          {site.nombre}{site.latitud && site.longitud ? ' 📍' : ''}
+                        </option>
+                      ))}
+                      <option value="__new__">+ Crear nuevo sitio...</option>
+                    </select>
+                  </div>
+
+                  {/* Error de sitio */}
+                  {siteError && (
+                    <p className="text-xs text-destructive mt-1">{siteError}</p>
+                  )}
+
+                  {/* Panel: Crear nuevo sitio */}
+                  {siteMode === 'create' && (
+                    <div className="mt-2 p-3 border border-brand-500/30 bg-brand-500/5 rounded-lg space-y-2 animate-fade-in">
+                      <p className="text-xs font-semibold text-brand-400 uppercase tracking-wider">Nuevo sitio</p>
+                      <div className="flex gap-2 items-center">
+                        <input
+                          autoFocus
+                          type="text"
+                          value={siteInput}
+                          onChange={(e) => setSiteInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCreateSite() } }}
+                          placeholder="Nombre del sitio (ej. Torre Norte)"
+                          className="input-field flex-1 text-sm"
+                        />
+                        <button
+                          type="button"
+                          disabled={!siteInput.trim() || createSiteMutation.isPending}
+                          onClick={handleCreateSite}
+                          className="px-3 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                        >
+                          {createSiteMutation.isPending
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Plus className="w-3.5 h-3.5" />}
+                          Agregar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setSiteMode('normal'); setSiteSelectorValue(''); setValue('site_id', null); setSiteError(null) }}
+                          className="p-2 hover:bg-secondary rounded-lg text-muted-foreground transition-colors shrink-0"
+                          title="Cancelar"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {/* Coordenadas opcionales para el sitio */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider block mb-1">Latitud del sitio</label>
+                          <input
+                            type="number"
+                            step="0.000001"
+                            value={siteInputLat}
+                            onChange={(e) => setSiteInputLat(e.target.value)}
+                            placeholder="-0.180653"
+                            className="input-field font-mono text-xs py-1.5"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider block mb-1">Longitud del sitio</label>
+                          <input
+                            type="number"
+                            step="0.000001"
+                            value={siteInputLng}
+                            onChange={(e) => setSiteInputLng(e.target.value)}
+                            placeholder="-78.467834"
+                            className="input-field font-mono text-xs py-1.5"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+
+                {/* Coordenadas GPS del gateway (Inputs manuales) */}
                 <div className="grid grid-cols-2 gap-3 pt-2">
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">Latitud</label>
@@ -554,7 +656,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                 {/* Notas (opcional) */}
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-1.5">
-                    Notas <span className="text-muted-foreground text-xs">(opcional)</span>
+                    Notas
                   </label>
                   <textarea
                     id="gateway-notas"
@@ -564,6 +666,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                     className="input-field resize-none"
                   />
                 </div>
+                
               </div>
 
               {/* Columna Derecha: Mapa Interactivo */}
@@ -595,7 +698,7 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                       url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     />
                     <MapEventsHandler />
-                    <MapController center={mapCenter} />
+                    <MapController center={mapCenter} flyTarget={mapFlyTarget} />
                     {latVal && lngVal && (
                       <Marker position={[latVal, lngVal]} icon={customMarkerIcon} />
                     )}
@@ -605,8 +708,8 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
             </div>
           )}
 
-          {/* PASO 2: CREDENCIALES Y TEST */}
-          {step === 2 && (
+          {/* TAB: CREDENCIALES Y TEST */}
+          {tab === 'credentials' && (
             <div className="max-w-2xl mx-auto py-4 space-y-4 animate-fade-in">
               <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
                 <Key className="w-4 h-4" /> Parámetros de Red y API MikroTik
@@ -748,8 +851,8 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
             </div>
           )}
 
-          {/* PASO 3: SERVICIOS Y MONITOREO */}
-          {step === 3 && (
+          {/* TAB: SERVICIOS Y MONITOREO */}
+          {tab === 'services' && (
             <div className="space-y-6 max-w-3xl mx-auto py-4 animate-fade-in">
               <div className="bg-brand-500/10 border border-brand-500/30 rounded-xl p-4 flex gap-3.5 items-start">
                 <div className="p-2 bg-brand-500/20 text-brand-400 rounded-lg shrink-0">
@@ -764,7 +867,6 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                 </div>
               </div>
 
-
               {/* MikroTik: Ancho de Banda y Recursos */}
               <div className="glass-card p-6 border border-border/60 space-y-5 bg-secondary/10">
                 <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
@@ -772,8 +874,6 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-
-                  {/* Ancho de Banda de Bajada */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">
                       Límite de Bajada de la Cola Padre (Mbps)
@@ -787,7 +887,6 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                     {errors.ancho_banda_down && <p className="text-xs text-destructive mt-1">{errors.ancho_banda_down.message}</p>}
                   </div>
 
-                  {/* Ancho de Banda de Subida */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">
                       Límite de Subida de la Cola Padre (Mbps)
@@ -801,7 +900,6 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                     {errors.ancho_banda_up && <p className="text-xs text-destructive mt-1">{errors.ancho_banda_up.message}</p>}
                   </div>
 
-                  {/* Nombre de la Cola Padre */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">
                       Nombre de la Cola Padre
@@ -822,17 +920,16 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                       ) : (
                         <div className="input-field flex items-center gap-2 text-muted-foreground text-xs italic select-none bg-secondary/20">
                           <GatewayIcon className="w-3.5 h-3.5 flex-shrink-0" />
-                          Sin colas configuradas — administra desde Ajustes → MikroTik
+                          Sin colas configuradas — administra desde Ajustes → Ajustes Gateway
                         </div>
                       )
                     })()}
                     <span className="text-[10px] text-muted-foreground mt-1 block">
-                      Agrega o edita colas padre desde <strong>Ajustes → MikroTik por Defecto</strong>.
+                      Agrega o edita colas padre desde <strong>Ajustes → Ajustes Gateway</strong>.
                     </span>
                     {errors.cola_padre && <p className="text-xs text-destructive mt-1">{errors.cola_padre.message}</p>}
                   </div>
 
-                  {/* Nombre de la Address List de Clientes */}
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">
                       Nombre de la Address List de Clientes
@@ -853,87 +950,49 @@ export function GatewayFormDialog({ open, onClose, gateway, onSuccess, onDelete 
                       ) : (
                         <div className="input-field flex items-center gap-2 text-muted-foreground text-xs italic select-none bg-secondary/20">
                           <Hash className="w-3.5 h-3.5 flex-shrink-0" />
-                          Sin address lists configuradas — administra desde Ajustes → MikroTik
+                          Sin address lists configuradas — administra desde Ajustes → Ajustes Gateway
                         </div>
                       )
                     })()}
                     <span className="text-[10px] text-muted-foreground mt-1 block">
-                      Agrega o edita address lists desde <strong>Ajustes → MikroTik por Defecto</strong>.
+                      Agrega o edita address lists desde <strong>Ajustes → Ajustes Gateway</strong>.
                     </span>
                     {errors.address_list && <p className="text-xs text-destructive mt-1">{errors.address_list.message}</p>}
                   </div>
-
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {/* Registro de Tráfico y Control de Velocidad */}
                 <div className="glass-card p-5 border border-border/60 space-y-4 bg-secondary/10">
                   <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
                     <Activity className="w-4 h-4" /> Tráfico y Rendimiento
                   </div>
-
-                  {/* Registro de tráfico */}
-                  <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center gap-3 py-2">
+                    <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
+                      <input type="checkbox" {...register('monitoreo_trafico')} className="sr-only peer" />
+                      <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                    </label>
                     <div>
                       <span className="text-sm font-medium text-foreground block">Registro de Tráfico</span>
                       <span className="text-xs text-muted-foreground">Monitorear y graficar consumo de interfaces</span>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer select-none">
-                      <input type="checkbox" {...register('monitoreo_trafico')} className="sr-only peer" />
-                      <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                    </label>
                   </div>
 
-                  {/* Control de velocidad */}
-                  <div className="flex items-center justify-between py-2 border-t border-border/40 pt-4">
+                  <div className="flex items-center gap-3 py-2 border-t border-border/40 pt-4">
+                    <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
+                      <input type="checkbox" {...register('control_velocidad')} className="sr-only peer" />
+                      <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                    </label>
                     <div>
                       <span className="text-sm font-medium text-foreground block">Control de Velocidad</span>
                       <span className="text-xs text-muted-foreground">Administración dinámica de colas (Queues)</span>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer select-none">
-                      <input type="checkbox" {...register('control_velocidad')} className="sr-only peer" />
-                      <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                    </label>
                   </div>
                 </div>
 
-                {/* Logs y Notificaciones */}
-                <div className="glass-card p-5 border border-border/60 space-y-4 bg-secondary/10">
-                  <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
-                    <Check className="w-4 h-4" /> Diagnóstico y Alertas
-                  </div>
-
-                  {/* Sincronización de Logs */}
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <span className="text-sm font-medium text-foreground block">Sincronización de Logs</span>
-                      <span className="text-xs text-muted-foreground">Capturar y analizar registros de RouterOS</span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer select-none">
-                      <input type="checkbox" {...register('sincronizar_logs')} className="sr-only peer" />
-                      <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                    </label>
-                  </div>
-
-                  {/* Notificaciones y alertas */}
-                  <div className="flex items-center justify-between py-2 border-t border-border/40 pt-4">
-                    <div>
-                      <span className="text-sm font-medium text-foreground block">Notificaciones de Estado</span>
-                      <span className="text-xs text-muted-foreground">Alertas en caso de desconexión o latencia alta</span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer select-none">
-                      <input type="checkbox" {...register('notificaciones_alertas')} className="sr-only peer" />
-                      <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                    </label>
-                  </div>
-                </div>
               </div>
-
             </div>
           )}
-
-
 
           {/* Error de guardado */}
           {saveMutation.isError && (

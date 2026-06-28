@@ -67,7 +67,7 @@ def get_or_create_parent_queue(api, name: str = "isp_padre") -> str:
 
 
 def sync_client_queue(
-    gateway: Gateway,
+    router: Gateway,
     client_name: str,
     ip: str,
     speed_up: int,  # in Kbps
@@ -88,15 +88,15 @@ def sync_client_queue(
     max_limit = f"{speed_up}k/{speed_down}k"
 
     try:
-        with gateway_pool.connect_to(gateway) as api:
+        with gateway_pool.connect_to(router) as api:
             # Sanear y resolver la cola padre
             clean_parent = get_clean_parent_name(parent)
             parent_name = get_or_create_parent_queue(api, clean_parent)
-            
+
             # Buscar por target IP
             query_target = api.path('/queue/simple').select().where(Key('target') == target_ip)
             existing = list(query_target)
-            
+
             # Si no se encuentra por IP, intentar por nombre
             if not existing:
                 query_name = api.path('/queue/simple').select().where(Key('name') == client_name)
@@ -132,16 +132,14 @@ def sync_client_queue(
             if existing:
                 entry = existing[0]
                 entry_id = entry.get(".id")
-                # Actualizar cola existente
                 list(api("/queue/simple/set", **{".id": entry_id, **params}))
-                logger.info(f"Cola simple actualizada en {gateway.nombre} para cliente {client_name} (IP: {ip}, Límite: {max_limit})")
+                logger.info(f"Cola simple actualizada en {router.nombre} para cliente {client_name} (IP: {ip}, Límite: {max_limit})")
             else:
-                # Crear nueva cola simple
                 list(api("/queue/simple/add", **params))
-                logger.info(f"Cola simple creada en {gateway.nombre} para cliente {client_name} (IP: {ip}, Límite: {max_limit})")
+                logger.info(f"Cola simple creada en {router.nombre} para cliente {client_name} (IP: {ip}, Límite: {max_limit})")
 
     except Exception as e:
-        logger.error(f"Error al sincronizar cola simple para IP {ip} en {gateway.nombre}: {e}")
+        logger.error(f"Error al sincronizar cola simple para IP {ip} en {router.nombre}: {e}")
         raise e
 
 

@@ -68,7 +68,7 @@ export function GatewaysPage() {
   const { data: gateways = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ['gateways'],
     queryFn: fetchGateways,
-    refetchInterval: 30_000, // polling cada 30 s
+    refetchInterval: 15_000, // polling cada 15 s
   })
 
   const deleteMutation = useMutation({
@@ -145,15 +145,6 @@ export function GatewaysPage() {
           <h1 className="text-2xl font-bold text-foreground">Gateways</h1>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            id="refresh-gateways"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="btn-secondary"
-          >
-            <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
-            Actualizar
-          </button>
           {isAdmin && (
             <button
               id="add-gateway"
@@ -241,9 +232,9 @@ export function GatewaysPage() {
                     <th>Gateway</th>
                     <th>Sitio</th>
                     <th className="hidden md:table-cell">IP / Host</th>
-                    <th>Estado</th>
                     <th className="hidden lg:table-cell">Versión ROS</th>
                     <th className="hidden lg:table-cell">Uptime</th>
+                    <th>Estado</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -280,9 +271,6 @@ export function GatewaysPage() {
                           {gateway.ip}:{gateway.puerto_api}
                         </code>
                       </td>
-                      <td>
-                        <GatewayStatusBadge status={gateway.status ?? 'unknown'} />
-                      </td>
                       <td className="hidden lg:table-cell">
                         <span className="text-xs text-muted-foreground font-mono">
                           {gateway.ros_version ?? '—'}
@@ -292,6 +280,9 @@ export function GatewaysPage() {
                         <span className="text-xs text-muted-foreground">
                           {formatUptime(gateway.uptime)}
                         </span>
+                      </td>
+                      <td>
+                        <GatewayStatusBadge status={gateway.status ?? 'unknown'} />
                       </td>
                     </tr>
                   ))}

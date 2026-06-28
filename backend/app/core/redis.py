@@ -14,5 +14,5 @@ redis_client: aioredis.Redis = aioredis.from_url(
 # ── Claves Redis ──────────────────────────────────────────────────────────────
 REFRESH_TOKEN_PREFIX = "refresh_token:"      # refresh_token:{user_id} → token
 GATEWAY_HEALTH_PREFIX = "gateway:health:"      # router:health:{router_id} → JSON
-ROUTER_STATUS_TTL = 90                        # segundos
+ROUTER_STATUS_TTL = 45                        # segundos
 REFRESH_TOKEN_TTL = 60 * 60 * 24 * 7         # 7 días en segundos

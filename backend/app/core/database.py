@@ -113,6 +113,18 @@ def run_migrations(bind_engine) -> None:
             conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS prorrateo_separado BOOLEAN DEFAULT TRUE;"))
             conn.execute(text("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS categoria VARCHAR(50);"))
             conn.execute(text("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS modelo VARCHAR(80);"))
+            conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS latitud DOUBLE PRECISION;"))
+            conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS longitud DOUBLE PRECISION;"))
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                id VARCHAR(36) PRIMARY KEY,
+                mikrotik_timeout INTEGER NOT NULL DEFAULT 10,
+                mikrotik_attempts INTEGER NOT NULL DEFAULT 1,
+                mikrotik_debug BOOLEAN NOT NULL DEFAULT FALSE,
+                mikrotik_ssl BOOLEAN NOT NULL DEFAULT FALSE,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            """))
             conn.execute(text("""
             CREATE TABLE IF NOT EXISTS product_categories (
                 id VARCHAR(36) PRIMARY KEY,
@@ -120,6 +132,24 @@ def run_migrations(bind_engine) -> None:
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
             """))
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                usuario_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                usuario_nombre VARCHAR(150),
+                accion VARCHAR(60) NOT NULL,
+                entidad_tipo VARCHAR(60),
+                entidad_id VARCHAR(36),
+                entidad_nombre VARCHAR(250),
+                detalle JSONB,
+                ip_address VARCHAR(45),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_accion ON audit_logs(accion);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_entidad_tipo ON audit_logs(entidad_tipo);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_entidad_id ON audit_logs(entidad_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at ON audit_logs(created_at DESC);"))
 
             # Renombrar columna router_id → gateway_id en cada tabla relacionada
             conn.execute(text("""

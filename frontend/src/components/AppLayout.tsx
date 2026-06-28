@@ -5,9 +5,9 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Wifi, LayoutDashboard, Router, Users,
+  LayoutDashboard, Router, Users,
   LogOut, Menu, X, ChevronDown, ChevronRight, Activity, Settings, Network,
-  Zap, Building, Sliders, BarChart2, Receipt, DollarSign, Package, Truck,
+  Zap, Building, Sliders, BarChart2, Receipt, DollarSign, Package, Truck, ClipboardList,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import api from '@/services/api'
@@ -73,6 +73,12 @@ const navItems: NavItem[] = [
       { to: '/inventory', icon: Package, label: 'Stock' },
       { to: '/providers', icon: Truck, label: 'Proveedores' },
     ]
+  },
+  {
+    to: '/audit-logs',
+    icon: ClipboardList,
+    label: 'Log del Sistema',
+    roles: ['admin']
   },
   {
     to: '/settings',

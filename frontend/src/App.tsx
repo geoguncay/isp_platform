@@ -4,7 +4,6 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-
 import { useAuthStore } from '@/stores/authStore'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AppLayout } from '@/components/AppLayout'
@@ -24,6 +23,7 @@ import { PaymentsPage } from '@/pages/PaymentsPage'
 import { InventoryPage } from '@/pages/InventoryPage'
 import { ProvidersPage } from '@/pages/ProvidersPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { AuditLogsPage } from '@/pages/AuditLogsPage'
 
 
 
@@ -69,7 +69,7 @@ function AppContent() {
           <Route path="/providers" element={<ProvidersPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
-
+          <Route path="/audit-logs" element={<AuditLogsPage />} />
         </Route>
       </Route>
 

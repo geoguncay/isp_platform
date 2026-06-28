@@ -53,6 +53,7 @@ from app.schemas.payment import PaymentResponse
 from app.schemas.ticket import TicketCreate, TicketResponse
 from app.schemas.traffic import TrafficResponse
 from app.schemas.invoice import InvoiceResponse
+from app.services.audit_service import AuditAction, log_event
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +215,7 @@ def list_clients(
 
 
 @router.post("", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
-def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> dict:
+def create_client(payload: ClientCreate, db: DBSession, current_user: AdminOrTecnico) -> dict:
     """Crea un nuevo cliente. Opcionalmente asigna un plan inicial y sincroniza IP estática en MikroTik."""
     # Verificar que el router exista y esté activo
     r = db.get(Router, payload.gateway_id)
@@ -426,6 +427,12 @@ def create_client(payload: ClientCreate, db: DBSession, _: AdminOrTecnico) -> di
 
     db.commit()
     db.refresh(client)
+
+    log_event(
+        db, AuditAction.CREATE_CLIENT,
+        entidad_tipo="Client", entidad_id=str(client.id), entidad_nombre=client.nombre,
+        usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+    )
 
     return _enrich_client(client, db)
 
@@ -794,7 +801,7 @@ def get_client_plan_history(
 
 @router.post("/{client_id}/assign-plan", response_model=ClientPlanResponse)
 def assign_client_plan(
-    client_id: uuid.UUID, plan_id: uuid.UUID, db: DBSession, _: AdminOrTecnico
+    client_id: uuid.UUID, plan_id: uuid.UUID, db: DBSession, current_user: AdminOrTecnico
 ) -> ClientPlan:
     """
     Asigna un nuevo plan a un cliente.
@@ -898,6 +905,13 @@ def assign_client_plan(
     db.commit()
     db.refresh(new_client_plan)
 
+    log_event(
+        db, AuditAction.ASSIGN_PLAN,
+        entidad_tipo="Client", entidad_id=str(client_id), entidad_nombre=client.nombre,
+        usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+        detalle={"plan_nombre": plan.nombre, "plan_id": str(plan_id)},
+    )
+
     return new_client_plan
 
 
@@ -950,7 +964,7 @@ def toggle_client_queue_endpoint(
     client_id: uuid.UUID,
     disabled: bool,
     db: DBSession,
-    _: AdminOrTecnico
+    current_user: AdminOrTecnico
 ) -> dict:
     """Habilita o desactiva la cola simple del cliente en MikroTik."""
     client = db.get(Client, client_id)
@@ -964,6 +978,12 @@ def toggle_client_queue_endpoint(
 
     try:
         toggle_client_queue(client.router, client.static_ip.ip, disabled)
+        log_event(
+            db, AuditAction.TOGGLE_QUEUE,
+            entidad_tipo="Client", entidad_id=str(client_id), entidad_nombre=client.nombre,
+            usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+            detalle={"disabled": disabled, "ip": client.static_ip.ip},
+        )
         return {
             "status": "success",
             "message": f"Cola {'deshabilitada' if disabled else 'habilitada'} exitosamente en MikroTik."
@@ -1056,6 +1076,13 @@ def suspend_client(
     except Exception as e:
         logger.warning(f"Error al disparar notificación de suspensión: {e}")
 
+    log_event(
+        db, AuditAction.SUSPEND_CLIENT,
+        entidad_tipo="Client", entidad_id=str(client.id), entidad_nombre=client.nombre,
+        usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+        detalle={"motivo": motivo},
+    )
+
     return log
 
 
@@ -1147,6 +1174,12 @@ def reactivate_client(
         send_suspension_notification(client.nombre, client.telefono, is_suspension=False)
     except Exception as e:
         logger.warning(f"Error al disparar notificación de reactivación: {e}")
+
+    log_event(
+        db, AuditAction.ACTIVATE_CLIENT,
+        entidad_tipo="Client", entidad_id=str(client.id), entidad_nombre=client.nombre,
+        usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+    )
 
     return log
 

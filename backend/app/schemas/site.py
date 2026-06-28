@@ -8,6 +8,14 @@ from pydantic import BaseModel, Field
 
 class SiteCreate(BaseModel):
     nombre: str = Field(min_length=2, max_length=120)
+    latitud: float | None = None
+    longitud: float | None = None
+
+
+class SiteUpdate(BaseModel):
+    nombre: str = Field(min_length=2, max_length=120)
+    latitud: float | None = None
+    longitud: float | None = None
 
 
 class SiteRead(BaseModel):
@@ -15,5 +23,7 @@ class SiteRead(BaseModel):
 
     id: uuid.UUID
     nombre: str
+    latitud: float | None = None
+    longitud: float | None = None
     created_at: datetime
     updated_at: datetime

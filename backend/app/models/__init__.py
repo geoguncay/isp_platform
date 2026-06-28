@@ -16,3 +16,5 @@ from app.models.custom_service import CustomService
 from app.models.site import Site
 from app.models.supplier import Supplier
 from app.models.inventory import InventoryItem
+from app.models.system_settings import SystemSettings
+from app.models.audit_log import AuditLog

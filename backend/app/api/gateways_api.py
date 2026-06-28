@@ -30,6 +30,7 @@ from app.schemas.gateway import (
     GatewayUpdate,
 )
 from app.services.mikrotik.health import check_router_health, get_cached_router_status
+from app.services.audit_service import AuditAction, log_event
 from app.services.mikrotik.gateway_pool import GatewayConnectionError, router_pool
 
 router = APIRouter(prefix="/gateways", tags=["gateways"])
@@ -60,7 +61,7 @@ async def list_routers(db: DBSession, _: CurrentUser) -> list:
 
 
 @router.post("", response_model=GatewayRead, status_code=status.HTTP_201_CREATED)
-def create_gateway(payload: GatewayCreate, db: DBSession, _: AdminOnly) -> Gateway:
+def create_gateway(payload: GatewayCreate, db: DBSession, current_user: AdminOnly) -> Gateway:
     # 1. Determinar y sanear nombres de cola padre y address list
     nombre_limpio = payload.nombre.strip().lower().replace(" ", "_")
     import re
@@ -122,10 +123,15 @@ def create_gateway(payload: GatewayCreate, db: DBSession, _: AdminOnly) -> Gatew
         try:
             sync_router_parent_queue(r)
         except Exception as e:
-            # Registrar error pero no cancelar la creación en base de datos
             import logging
             logging.getLogger(__name__).error(f"No se pudo crear cola padre en MikroTik para el router: {e}")
             pass
+
+    log_event(
+        db, AuditAction.CREATE_GATEWAY,
+        entidad_tipo="Gateway", entidad_id=str(r.id), entidad_nombre=r.nombre,
+        usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+    )
 
     return r
 
@@ -198,7 +204,7 @@ async def get_router(gateway_id: uuid.UUID, db: DBSession, _: CurrentUser) -> di
 
 @router.put("/{gateway_id}", response_model=GatewayRead)
 def update_router(
-    gateway_id: uuid.UUID, payload: GatewayUpdate, db: DBSession, _: AdminOnly
+    gateway_id: uuid.UUID, payload: GatewayUpdate, db: DBSession, current_user: AdminOnly
 ) -> Gateway:
     r = db.get(Gateway, gateway_id)
     if not r:
@@ -261,17 +267,29 @@ def update_router(
             logging.getLogger(__name__).error(f"No se pudo actualizar la cola padre en MikroTik para el router: {e}")
             pass
 
+    log_event(
+        db, AuditAction.UPDATE_GATEWAY,
+        entidad_tipo="Gateway", entidad_id=str(r.id), entidad_nombre=r.nombre,
+        usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+    )
+
     return r
 
 
 @router.delete("/{gateway_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_router(gateway_id: uuid.UUID, db: DBSession, _: AdminOnly) -> None:
+def delete_router(gateway_id: uuid.UUID, db: DBSession, current_user: AdminOnly) -> None:
     r = db.get(Gateway, gateway_id)
     if not r:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gateway no encontrado")
+    gateway_nombre = r.nombre
     # Soft delete
     r.activo = False
     db.commit()
+    log_event(
+        db, AuditAction.DELETE_GATEWAY,
+        entidad_tipo="Gateway", entidad_id=str(gateway_id), entidad_nombre=gateway_nombre,
+        usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+    )
 
 
 @router.get("/{gateway_id}/status", response_model=GatewayStatus)
@@ -316,6 +334,30 @@ def test_router_connection(gateway_id: uuid.UUID, db: DBSession, _: AdminOnly) -
         )
 
 
+@router.get("/{gateway_id}/logs")
+def get_gateway_logs(
+    gateway_id: uuid.UUID,
+    db: DBSession,
+    _: AdminOrTecnico,
+    limit: int = 100,
+) -> dict:
+    """
+    Obtiene las últimas entradas del log del sistema RouterOS.
+    Solo disponible cuando Debug está activo en Ajustes → MikroTik API.
+    """
+    r = db.get(Gateway, gateway_id)
+    if not r or not r.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gateway no encontrado")
+
+    try:
+        with router_pool.connect_to(r) as api_conn:
+            raw = list(api_conn("/log/print"))
+        entries = raw[-limit:] if len(raw) > limit else raw
+        return {"logs": entries, "total": len(raw)}
+    except GatewayConnectionError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+
 @router.get("/{gateway_id}/address-lists", response_model=list[str])
 def get_router_address_lists(gateway_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -> list[str]:
     """
@@ -341,7 +383,7 @@ def get_router_address_lists(gateway_id: uuid.UUID, db: DBSession, _: AdminOrTec
 def import_clients_from_router(
     gateway_id: uuid.UUID,
     db: DBSession,
-    _: AdminOnly,
+    current_user: AdminOnly,
     list_name: str = "clientes"
 ) -> dict:
     """
@@ -428,6 +470,12 @@ def import_clients_from_router(
         imported_count += 1
 
     db.commit()
+    log_event(
+        db, AuditAction.IMPORT_CLIENTS,
+        entidad_tipo="Gateway", entidad_id=str(gateway_id), entidad_nombre=r.nombre,
+        usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+        detalle={"imported_count": imported_count, "list_name": list_name},
+    )
     return {"status": "success", "imported_count": imported_count}
 
 

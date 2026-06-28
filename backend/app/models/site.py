@@ -4,7 +4,7 @@ Modelo SQLAlchemy: Site (Sitio)
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Uuid, func
+from sqlalchemy import DateTime, Float, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -17,6 +17,8 @@ class Site(Base):
         Uuid(native_uuid=False), primary_key=True, default=uuid.uuid4
     )
     nombre: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
+    latitud: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitud: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

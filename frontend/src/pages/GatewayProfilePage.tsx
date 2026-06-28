@@ -5,9 +5,10 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowLeft, RefreshCw, MapPin, Shield, Wifi, Server, Clock,
-  CheckCircle2, XCircle, Sliders, AlertCircle, Loader2, X, Plus,
-  Edit2, Trash2, Download, Search, Users, Network, Activity
+  ArrowLeft, RefreshCw, MapPin, Wifi, Server,
+  CheckCircle2, XCircle, Sliders, AlertCircle, Loader2, X,
+  Edit2, Download, Search, Users, Network, Activity, ScrollText, ClipboardList,
+  WifiOff, UserPlus, UserX, UserCheck, Zap, ToggleLeft,
 } from 'lucide-react'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
@@ -17,10 +18,7 @@ import { GatewayStatusBadge } from '@/components/GatewayStatusBadge'
 import { GatewayFormDialog } from '@/components/GatewayFormDialog'
 import { useAuthStore } from '@/stores/authStore'
 import { formatUptime } from '@/lib/utils'
-import TrafficChart, { formatSpeed } from '@/components/TrafficChart'
-
-// Centrado por defecto en Quito, Ecuador
-const DEFAULT_CENTER: [number, number] = [-0.180653, -78.467834]
+import { formatSpeed } from '@/components/TrafficChart'
 
 // Icono personalizado violeta para el Router
 const routerSvg = `data:image/svg+xml;utf8,${encodeURIComponent(`
@@ -98,6 +96,14 @@ function parseMaxLimit(maxLimit: string | undefined): [number, number] {
   }
 
   return [parsePart(parts[0]), parsePart(parts[1])]
+}
+
+// Helper to format raw bytes into MB / GB / TB
+function formatBytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024)
+  if (mb >= 1024 * 1024) return `${(mb / (1024 * 1024)).toFixed(2)} TB`
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`
+  return `${mb.toFixed(1)} MB`
 }
 
 // Helper to format dynamic assigned bandwidth dynamically (e.g. 1500 Mbps -> 1.5 GB)
@@ -224,7 +230,7 @@ export function GatewayProfilePage() {
   const { user } = useAuthStore()
   const isAdmin = user?.rol === 'admin'
 
-  const [activeTab, setActiveTab] = useState<'stats' | 'clients' | 'queues' | 'settings' | 'pppoe'>('stats')
+  const [activeTab, setActiveTab] = useState<'stats' | 'clients' | 'queues' | 'pppoe' | 'logs' | 'historial'>('stats')
   const [selectedQueue, setSelectedQueue] = useState<any | null>(null)
   const [selectedPlanId, setSelectedPlanId] = useState<string>('')
   const [searchTerm, setSearchTerm] = useState('')
@@ -250,6 +256,7 @@ export function GatewayProfilePage() {
 
   // Ranking en vivo de clientes por consumo total
   const [liveClients, setLiveClients] = useState<any[]>([])
+  const [bridgeBytes, setBridgeBytes] = useState<{ rx: number; tx: number } | null>(null)
 
   useEffect(() => {
     const wsUrl = (() => {
@@ -275,6 +282,8 @@ export function GatewayProfilePage() {
         const clients = payload.clients || []
         const sortedClients = [...clients].sort((a: any, b: any) => (b.rx_rate + b.tx_rate) - (a.rx_rate + a.tx_rate))
         setLiveClients(sortedClients)
+        const bridge = (payload.interfaces || []).find((i: any) => i.name === 'bridge1')
+        if (bridge) setBridgeBytes({ rx: bridge.rx_bytes || 0, tx: bridge.tx_bytes || 0 })
       } catch (err) {
         console.error('Error al procesar mensaje de tráfico en vivo:', err)
       }
@@ -287,13 +296,14 @@ export function GatewayProfilePage() {
 
 
 
-  // Consultar información del Router
+  // Consultar información del Router — se refresca automáticamente cada 15 s
   const { data: router, isLoading: isLoadingRouter, isError: isErrorRouter, refetch: refetchRouter } = useQuery({
     queryKey: ['router', id],
     queryFn: async () => {
       const { data } = await api.get(`/gateways/${id}`)
       return data
-    }
+    },
+    refetchInterval: 15_000,
   })
 
 
@@ -496,6 +506,64 @@ export function GatewayProfilePage() {
     }
   })
 
+  // Config MikroTik API (para saber si debug está activo)
+  const { data: mikrotikConfig } = useQuery<{ mikrotik_debug: boolean }>({
+    queryKey: ['mikrotik-api-config'],
+    queryFn: async () => {
+      const { data } = await api.get('/settings/mikrotik-api')
+      return data
+    },
+  })
+  const debugEnabled = mikrotikConfig?.mikrotik_debug ?? false
+
+  // Logs del sistema RouterOS (solo cuando debug activo y tab logs)
+  const { data: logsData, isFetching: fetchingLogs, refetch: refetchLogs } = useQuery<{
+    logs: Array<{ time?: string; topics?: string; message?: string }>
+    total: number
+  }>({
+    queryKey: ['gateway-logs', id],
+    queryFn: async () => {
+      const { data } = await api.get(`/gateways/${id}/logs?limit=150`)
+      return data
+    },
+    enabled: activeTab === 'logs' && debugEnabled,
+    refetchInterval: activeTab === 'logs' && debugEnabled ? 10000 : undefined,
+  })
+
+  // Historial ISP: audit logs filtrados por este gateway
+  const { data: auditData, isFetching: fetchingAudit, refetch: refetchAudit } = useQuery<{
+    items: Array<{
+      id: string; accion: string; usuario_nombre: string | null
+      entidad_nombre: string | null; detalle: Record<string, unknown> | null
+      ip_address: string | null; created_at: string
+    }>
+    total: number
+  }>({
+    queryKey: ['gateway-audit', id],
+    queryFn: async () => {
+      const { data } = await api.get('/audit-logs', {
+        params: { entidad_id: id, limit: 100 }
+      })
+      return data
+    },
+    enabled: activeTab === 'historial',
+    refetchInterval: activeTab === 'historial' ? 15_000 : undefined,
+  })
+
+  const AUDIT_META: Record<string, { label: string; color: string; icon: React.ComponentType<any> }> = {
+    CREATE_GATEWAY:  { label: 'Gateway creado',       color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', icon: Server },
+    UPDATE_GATEWAY:  { label: 'Configuración editada', color: 'text-amber-400 bg-amber-500/10 border-amber-500/20',      icon: Server },
+    DELETE_GATEWAY:  { label: 'Gateway eliminado',    color: 'text-red-400 bg-red-500/10 border-red-500/20',            icon: Server },
+    GATEWAY_ONLINE:  { label: 'Conectado',            color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', icon: Wifi },
+    GATEWAY_OFFLINE: { label: 'Desconectado',         color: 'text-red-400 bg-red-500/10 border-red-500/20',            icon: WifiOff },
+    IMPORT_CLIENTS:  { label: 'Importación clientes', color: 'text-purple-400 bg-purple-500/10 border-purple-500/20',   icon: Download },
+    CREATE_CLIENT:   { label: 'Cliente creado',       color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', icon: UserPlus },
+    SUSPEND_CLIENT:  { label: 'Cliente suspendido',   color: 'text-orange-400 bg-orange-500/10 border-orange-500/20',   icon: UserX },
+    ACTIVATE_CLIENT: { label: 'Cliente activado',     color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', icon: UserCheck },
+    ASSIGN_PLAN:     { label: 'Plan asignado',        color: 'text-brand-400 bg-brand-500/10 border-brand-500/20',      icon: Zap },
+    TOGGLE_QUEUE:    { label: 'Cola modificada',      color: 'text-amber-400 bg-amber-500/10 border-amber-500/20',      icon: ToggleLeft },
+  }
+
   // Función para sincronizar de manera completa todos los datos
   const handleSyncAll = () => {
     refetchRouter()
@@ -583,10 +651,10 @@ export function GatewayProfilePage() {
     return acc + down
   }, 0)
 
-  const trafficDownGb = Math.round(activeClients * 148.5)
-  const trafficUpGb = Math.round(activeClients * 34.2)
-  const totalTrafficGb = trafficDownGb + trafficUpGb
-  const downTrafficPct = totalTrafficGb > 0 ? (trafficDownGb / totalTrafficGb) * 100 : 80
+  const totalRxBytes = bridgeBytes?.rx ?? 0
+  const totalTxBytes = bridgeBytes?.tx ?? 0
+  const totalBytes = totalRxBytes + totalTxBytes
+  const rxBytesPct = totalBytes > 0 ? (totalRxBytes / totalBytes) * 100 : 50
 
   const totalPages = Math.ceil((paginatedClientsData.total || 0) / clientsLimit)
 
@@ -626,7 +694,7 @@ export function GatewayProfilePage() {
               className="btn-primary"
             >
               <Edit2 className="w-4 h-4" />
-              Editar Router
+              Editar
             </button>
           )}
         </div>
@@ -786,7 +854,8 @@ export function GatewayProfilePage() {
               { id: 'clients', label: 'Clientes Asociados', icon: Users },
               { id: 'queues', label: 'Colas de Tráfico', icon: Activity },
               { id: 'pppoe', label: 'Sesiones PPPoE', icon: Wifi },
-              { id: 'settings', label: 'Diagnóstico', icon: Sliders },
+              ...(debugEnabled ? [{ id: 'logs', label: 'Logs ROS', icon: ScrollText }] : []),
+              { id: 'historial', label: 'Historial ISP', icon: ClipboardList },
             ].map((tab) => {
               const Icon = tab.icon
               const isActive = activeTab === tab.id
@@ -825,15 +894,15 @@ export function GatewayProfilePage() {
                 />
 
                 <DonutChart
-                  percentage={downTrafficPct}
-                  title="Consumo de Tráfico General (Este mes)"
-                  label1="Descarga (Down)"
-                  val1={`${trafficDownGb} GB`}
+                  percentage={rxBytesPct}
+                  title="Tráfico Total"
+                  label1="Descargado"
+                  val1={formatBytes(totalRxBytes)}
                   color1="#3b82f6"
-                  label2="Subida (Up)"
-                  val2={`${trafficUpGb} GB`}
-                  color2="#a855f7"
-                  centerLabel={`${(totalTrafficGb / 1000).toFixed(2)} TB`}
+                  label2="Subido"
+                  val2={formatBytes(totalTxBytes)}
+                  color2="#a835f7"
+                  centerLabel={formatBytes(totalBytes)}
                   centerSublabel="Total"
                 />
               </div>
@@ -940,7 +1009,7 @@ export function GatewayProfilePage() {
                           <th>Cliente</th>
                           <th>Tasa Descarga (RX)</th>
                           <th>Tasa Subida (TX)</th>
-                          <th>Consumo Total (Acumulado)</th>
+                          <th>Consumo Total</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -960,7 +1029,13 @@ export function GatewayProfilePage() {
                               {formatSpeed(lc.tx_rate)}
                             </td>
                             <td className="font-mono text-xs text-muted-foreground">
-                              {((lc.rx_bytes + lc.tx_bytes) / (1024 * 1024)).toFixed(1)} MB
+                              {(() => {
+                                const bytes = lc.rx_bytes + lc.tx_bytes
+                                const mb = bytes / (1024 * 1024)
+                                if (mb >= 1024 * 1024) return `${(mb / (1024 * 1024)).toFixed(2)} TB`
+                                if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`
+                                return `${mb.toFixed(1)} MB`
+                              })()}
                             </td>
                           </tr>
                         ))}
@@ -1215,85 +1290,6 @@ export function GatewayProfilePage() {
             </div>
           )}
 
-          {/* Pestaña: Configuración y Diagnóstico */}
-          {activeTab === 'settings' && (
-            <div className="space-y-6">
-              {/* Sección Diagnóstico de MikroTik */}
-              <div className="glass-card p-5 space-y-4 border border-border/40">
-                <div className="flex items-center justify-between border-b border-border/40 pb-2.5">
-                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-brand-400" />
-                    Diagnóstico de API
-                  </h3>
-                  <button
-                    onClick={handleTestConnection}
-                    disabled={isTesting}
-                    className="btn-secondary text-xs"
-                  >
-                    {isTesting ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    )}
-                    {isTesting ? 'Probando...' : 'Ejecutar Test'}
-                  </button>
-                </div>
-
-                {testResult ? (
-                  <div
-                    className={`rounded-lg p-3 flex items-start gap-3 ${testResult.success
-                      ? 'bg-emerald-500/10 border border-emerald-500/30'
-                      : 'bg-destructive/10 border border-destructive/30'
-                      }`}
-                  >
-                    {testResult.success ? (
-                      <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                    ) : (
-                      <XCircle className="w-4.5 h-4.5 text-destructive flex-shrink-0 mt-0.5" />
-                    )}
-                    <div className="text-xs space-y-1">
-                      <p className={testResult.success ? 'text-emerald-400 font-semibold' : 'text-destructive font-semibold'}>
-                        {testResult.message}
-                      </p>
-                      {testResult.ros_version && (
-                        <p className="text-muted-foreground font-mono">
-                          Versión ROS: {testResult.ros_version} · Uptime: {testResult.uptime}
-                        </p>
-                      )}
-                      {testResult.error && (
-                        <p className="text-muted-foreground font-mono leading-relaxed">{testResult.error}</p>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Presiona el botón para ejecutar una prueba de conexión en vivo con la API de MikroTik de este router y validar credenciales.
-                  </p>
-                )}
-              </div>
-
-
-              {/* Zona Peligrosa */}
-              {isAdmin && (
-                <div className="glass-card p-5 border border-red-500/20 bg-red-500/5 space-y-4">
-                  <h3 className="text-sm font-semibold text-red-400 flex items-center gap-2 border-b border-red-500/10 pb-2.5">
-                    <Trash2 className="w-4 h-4 text-red-400" />
-                    Zona de Peligro
-                  </h3>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Al eliminar este router, se desactivará en la plataforma. No se eliminarán los datos históricos de clientes, pero estos dejarán de estar asignados a un router en línea.
-                  </p>
-                  <button
-                    onClick={() => setConfirmDeleteOpen(true)}
-                    className="btn-destructive w-full sm:w-auto px-4"
-                  >
-                    Desactivar y Eliminar Router
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Pestaña: Sesiones PPPoE Activas */}
           {activeTab === 'pppoe' && (
             <div className="space-y-6 font-sans animate-fade-in">
@@ -1383,6 +1379,205 @@ export function GatewayProfilePage() {
                   </table>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Pestaña: Logs RouterOS */}
+          {activeTab === 'logs' && debugEnabled && (
+            <div className="space-y-4 animate-fade-in">
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ScrollText className="w-4 h-4 text-brand-400" />
+                  <span className="text-sm font-semibold text-foreground">
+                    Log del sistema RouterOS
+                  </span>
+                  {logsData && (
+                    <span className="text-xs text-muted-foreground">
+                      — mostrando últimas {logsData.logs.length} de {logsData.total} entradas
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => refetchLogs()}
+                  disabled={fetchingLogs}
+                  className="btn-secondary text-xs py-1.5 px-3"
+                >
+                  {fetchingLogs
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <RefreshCw className="w-3.5 h-3.5" />}
+                  Actualizar
+                </button>
+              </div>
+
+              {/* Tabla de logs */}
+              {fetchingLogs && !logsData ? (
+                <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="text-sm">Obteniendo logs del router...</span>
+                </div>
+              ) : logsData && logsData.logs.length > 0 ? (
+                <div className="border border-border/60 rounded-xl overflow-hidden bg-background/20">
+                  <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead className="sticky top-0 z-10">
+                        <tr className="bg-secondary/60 border-b border-border/60 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                          <th className="px-4 py-3 w-36">Hora</th>
+                          <th className="px-4 py-3 w-40">Categoría</th>
+                          <th className="px-4 py-3">Mensaje</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/30 font-mono text-xs">
+                        {[...logsData.logs].reverse().map((entry, i) => {
+                          const topics = entry.topics ?? ''
+                          const rowColor = topics.includes('error')
+                            ? 'text-red-400 bg-red-500/5'
+                            : topics.includes('warning')
+                            ? 'text-amber-400 bg-amber-500/5'
+                            : topics.includes('debug')
+                            ? 'text-blue-400'
+                            : 'text-foreground/80'
+                          return (
+                            <tr key={i} className={`hover:bg-secondary/20 transition-colors ${rowColor}`}>
+                              <td className="px-4 py-2 whitespace-nowrap text-muted-foreground">
+                                {entry.time ?? '—'}
+                              </td>
+                              <td className="px-4 py-2 whitespace-nowrap">
+                                <span className="px-1.5 py-0.5 rounded bg-secondary/50 text-[10px] font-semibold">
+                                  {topics || '—'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 break-all">{entry.message ?? ''}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground text-sm border border-dashed border-border/40 rounded-xl">
+                  <ScrollText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p>No hay entradas de log disponibles.</p>
+                </div>
+              )}
+
+              <p className="text-[11px] text-muted-foreground text-center">
+                Se actualiza automáticamente cada 10 segundos · Debug activo en Ajustes → MikroTik API
+              </p>
+            </div>
+          )}
+
+          {/* Pestaña: Historial ISP */}
+          {activeTab === 'historial' && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ClipboardList className="w-4 h-4 text-brand-400" />
+                  <span className="text-sm font-semibold text-foreground">Historial de eventos ISP</span>
+                  {auditData && (
+                    <span className="text-xs text-muted-foreground">
+                      — {auditData.total} eventos
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => refetchAudit()}
+                  disabled={fetchingAudit}
+                  className="btn-secondary text-xs py-1.5 px-3"
+                >
+                  {fetchingAudit
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <RefreshCw className="w-3.5 h-3.5" />}
+                  Actualizar
+                </button>
+              </div>
+
+              {fetchingAudit && !auditData ? (
+                <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="text-sm">Cargando historial...</span>
+                </div>
+              ) : auditData && auditData.items.length > 0 ? (
+                <div className="glass-card overflow-hidden">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha / Hora</th>
+                        <th>Evento</th>
+                        <th>Detalle</th>
+                        <th>Usuario</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditData.items.map((entry) => {
+                        const meta = AUDIT_META[entry.accion] ?? {
+                          label: entry.accion,
+                          color: 'text-slate-400 bg-slate-500/10 border-slate-500/20',
+                          icon: ClipboardList,
+                        }
+                        const Icon = meta.icon
+                        const detalle = entry.detalle
+                        const detalleText = detalle
+                          ? Object.entries(detalle)
+                              .filter(([k]) => k !== 'source')
+                              .map(([k, v]) => {
+                                if (k === 'motivo') return `Motivo: ${v}`
+                                if (k === 'plan_nombre') return `Plan: ${v}`
+                                if (k === 'imported_count') return `${v} importados`
+                                if (k === 'disabled') return v ? 'Deshabilitada' : 'Habilitada'
+                                if (k === 'ip') return `IP: ${v}`
+                                return null
+                              })
+                              .filter(Boolean)
+                              .join(' · ')
+                          : ''
+                        return (
+                          <tr key={entry.id} className="hover:bg-secondary/30 transition-colors">
+                            <td className="whitespace-nowrap">
+                              <span className="text-xs font-mono text-muted-foreground">
+                                {new Date(entry.created_at).toLocaleString('es-EC', {
+                                  day: '2-digit', month: '2-digit', year: '2-digit',
+                                  hour: '2-digit', minute: '2-digit', second: '2-digit',
+                                })}
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${meta.color}`}>
+                                <Icon className="w-3 h-3" />
+                                {meta.label}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="text-xs text-muted-foreground">
+                                {detalleText || '—'}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="text-xs text-foreground font-medium">
+                                {entry.usuario_nombre ?? (
+                                  <span className="text-muted-foreground italic">Sistema</span>
+                                )}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground text-sm border border-dashed border-border/40 rounded-xl">
+                  <ClipboardList className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p>No hay eventos registrados para este gateway.</p>
+                </div>
+              )}
+
+              <p className="text-[11px] text-muted-foreground text-center">
+                Se actualiza automáticamente cada 15 segundos
+              </p>
             </div>
           )}
         </div>

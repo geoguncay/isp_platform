@@ -27,10 +27,10 @@ celery_app.conf.update(
     task_track_started=True,
     worker_redirect_stdouts_level="INFO",
     beat_schedule={
-        # Health check de todos los routers cada 60 segundos
+        # Health check de todos los routers cada 30 segundos
         "check-all-routers-health": {
             "task": "app.workers.health_check.check_all_routers",
-            "schedule": 60.0,  # segundos
+            "schedule": 30.0,  # segundos
         },
         # Verificación diaria de suspensiones a la 1:00 AM
         "daily-suspension-check": {

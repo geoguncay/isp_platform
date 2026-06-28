@@ -5,7 +5,7 @@ Dos formas de crear el admin:
   1. Seed automático al iniciar la API en modo development (app/core/seed.py)
   2. POST /api/auth/setup — funciona en cualquier entorno; requiere ADMIN_SEED_KEY
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from jose import JWTError
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.exc import IntegrityError
@@ -52,7 +52,7 @@ class SetupResponse(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, db: DBSession) -> TokenResponse:
+async def login(payload: LoginRequest, db: DBSession, request: Request) -> TokenResponse:
     """
     Autentica al usuario con email/password.
     Devuelve access_token (Bearer) y almacena refresh_token en Redis.
@@ -79,6 +79,18 @@ async def login(payload: LoginRequest, db: DBSession) -> TokenResponse:
         f"{REFRESH_TOKEN_PREFIX}{user_id}",
         REFRESH_TOKEN_TTL,
         refresh_token,
+    )
+
+    from app.services.audit_service import AuditAction, log_event
+    log_event(
+        db,
+        accion=AuditAction.USER_LOGIN,
+        entidad_tipo="User",
+        entidad_id=str(user.id),
+        entidad_nombre=user.nombre,
+        usuario_id=user.id,
+        usuario_nombre=user.nombre,
+        ip_address=request.client.host if request.client else None,
     )
 
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)

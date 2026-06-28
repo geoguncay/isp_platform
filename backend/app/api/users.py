@@ -107,6 +107,22 @@ def update_user(
     if "password" in update_data:
         update_data["hashed_password"] = hash_password(update_data.pop("password"))
 
+    # Proteger contra dejar el sistema sin admin activo
+    if user.rol == "admin":
+        desactivando = update_data.get("activo") is False
+        cambiando_rol = "rol" in update_data and update_data["rol"] != "admin"
+        if desactivando or cambiando_rol:
+            admins_activos = (
+                db.query(User)
+                .filter(User.rol == "admin", User.activo == True, User.id != user.id)
+                .count()
+            )
+            if admins_activos == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="No se puede desactivar o cambiar el rol de este administrador porque es el único activo en el sistema.",
+                )
+
     for field, value in update_data.items():
         setattr(user, field, value)
 
