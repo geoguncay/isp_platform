@@ -26,6 +26,9 @@ const companySchema = z.object({
   email: z.string().email('Correo inválido').optional().or(z.literal('')).or(z.null()),
   sitio_web: z.string().max(255).optional().or(z.literal('')),
   logo_url: z.string().max(255).optional().or(z.literal('')).or(z.null()),
+  use_logo_on_login: z.boolean().default(false),
+  login_bg_url: z.string().max(255).optional().or(z.literal('')).or(z.null()),
+  use_login_bg: z.boolean().default(false),
 })
 
 type CompanyFormData = z.infer<typeof companySchema>
@@ -92,6 +95,9 @@ export function SettingsPage() {
   const [editingValue, setEditingValue] = useState<string | null>(null)
   const [editingLabel, setEditingLabel] = useState('')
 
+  const [billingDirty, setBillingDirty] = useState(false)
+  const [suspensionDirty, setSuspensionDirty] = useState(false)
+
   // Estados locales para MikroTik API (sincronizados desde la DB vía useQuery)
   const [mikrotikAttempts, setMikrotikAttempts] = useState(1)
   const [mikrotikTimeout, setMikrotikTimeout] = useState(10)
@@ -138,6 +144,13 @@ export function SettingsPage() {
       setMikrotikSsl(mikrotikConfig.mikrotik_ssl)
     }
   }, [mikrotikConfig])
+
+  const mikrotikDirty = !!mikrotikConfig && (
+    mikrotikAttempts !== mikrotikConfig.mikrotik_attempts ||
+    mikrotikTimeout !== mikrotikConfig.mikrotik_timeout ||
+    mikrotikDebug !== mikrotikConfig.mikrotik_debug ||
+    mikrotikSsl !== mikrotikConfig.mikrotik_ssl
+  )
 
   const mikrotikApiMutation = useMutation({
     mutationFn: async (payload: object) => {
@@ -295,7 +308,10 @@ export function SettingsPage() {
   })
 
   const watchLogoUrl = watchCompany('logo_url')
+  const watchLoginBgUrl = watchCompany('login_bg_url')
+  const [isCompanyDirty, setIsCompanyDirty] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [uploadingLoginBg, setUploadingLoginBg] = useState(false)
   const [showManualUrl, setShowManualUrl] = useState(false)
 
   useEffect(() => {
@@ -308,10 +324,14 @@ export function SettingsPage() {
         email: companyData.email || '',
         sitio_web: companyData.sitio_web || '',
         logo_url: companyData.logo_url || '',
+        use_logo_on_login: companyData.use_logo_on_login ?? false,
+        login_bg_url: companyData.login_bg_url || '',
+        use_login_bg: companyData.use_login_bg ?? false,
       })
       if (companyData.logo_url && (companyData.logo_url.startsWith('http://') || companyData.logo_url.startsWith('https://'))) {
         setShowManualUrl(true)
       }
+      setIsCompanyDirty(false)
     }
   }, [companyData, resetCompany])
 
@@ -320,9 +340,11 @@ export function SettingsPage() {
       const cleanData = { ...data }
       if (cleanData.email === '') cleanData.email = null
       if (cleanData.logo_url === '') cleanData.logo_url = null
+      if (cleanData.login_bg_url === '') cleanData.login_bg_url = null
       await api.put('/company', cleanData)
     },
     onSuccess: () => {
+      setIsCompanyDirty(false)
       setStatusMessage({ type: 'success', text: 'Datos de la empresa actualizados exitosamente' })
       queryClient.invalidateQueries({ queryKey: ['company'] })
     },
@@ -359,6 +381,7 @@ export function SettingsPage() {
         },
       })
       setValueCompany('logo_url', data.logo_url)
+      setIsCompanyDirty(true)
       queryClient.invalidateQueries({ queryKey: ['company'] })
       setStatusMessage({ type: 'success', text: 'Logo de la empresa subido correctamente' })
     } catch (err: any) {
@@ -366,6 +389,37 @@ export function SettingsPage() {
       setStatusMessage({ type: 'error', text: errMsg })
     } finally {
       setUploadingLogo(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleLoginBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
+    if (!validTypes.includes(file.type)) {
+      setStatusMessage({ type: 'error', text: 'Solo se permiten imágenes (PNG, JPG, JPEG, WEBP)' })
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('file', file)
+    setUploadingLoginBg(true)
+    setStatusMessage(null)
+
+    try {
+      const { data } = await api.post('/company/login-bg', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setValueCompany('login_bg_url', data.login_bg_url)
+      setIsCompanyDirty(true)
+      queryClient.invalidateQueries({ queryKey: ['company'] })
+      setStatusMessage({ type: 'success', text: 'Fondo de inicio de sesión subido correctamente' })
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err?.response?.data?.detail || 'Error al subir el fondo' })
+    } finally {
+      setUploadingLoginBg(false)
       e.target.value = ''
     }
   }
@@ -704,6 +758,7 @@ export function SettingsPage() {
                 <form
                   id="company-form"
                   onSubmit={handleSubmitCompany((data) => companyMutation.mutate(data))}
+                  onChange={() => setIsCompanyDirty(true)}
                   className="space-y-4"
                 >
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -823,8 +878,8 @@ export function SettingsPage() {
                   </div>
 
                   {/* Logo Section */}
-                  <div className="col-span-1 md:col-span-2 p-4 rounded-xl bg-background/30 border border-border/50 backdrop-blur-md">
-                    <label className="block text-sm font-medium text-foreground mb-3">
+                  <div className="col-span-1 md:col-span-2 p-4 rounded-xl bg-background/30 border border-border/50 backdrop-blur-md space-y-4">
+                    <label className="block text-sm font-medium text-foreground">
                       Logotipo de la Empresa
                     </label>
                     <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -855,8 +910,7 @@ export function SettingsPage() {
                         <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3">
                           <label
                             htmlFor="logo-file-input"
-                            className={`btn-primary flex items-center gap-2 cursor-pointer text-xs py-2 px-4 select-none ${uploadingLogo ? 'opacity-50 pointer-events-none' : ''
-                              }`}
+                            className={`btn-primary flex items-center gap-2 cursor-pointer text-xs py-2 px-4 select-none ${uploadingLogo ? 'opacity-50 pointer-events-none' : ''}`}
                           >
                             <Upload className="w-4 h-4" />
                             Subir Imagen Logo
@@ -883,7 +937,7 @@ export function SettingsPage() {
 
                     {/* Collapsible Manual URL input */}
                     {showManualUrl && (
-                      <div className="mt-4 pt-4 border-t border-border/30 animate-fade-in">
+                      <div className="pt-3 border-t border-border/30 animate-fade-in">
                         <label htmlFor="company-logo-url" className="block text-xs font-medium text-muted-foreground mb-1.5">
                           Dirección URL externa del Logo
                         </label>
@@ -902,6 +956,100 @@ export function SettingsPage() {
                         )}
                       </div>
                     )}
+
+                    {/* Toggle: usar logo en login */}
+                    <label className="flex items-center gap-4 py-3 px-4 rounded-xl bg-secondary/20 border border-border/50 cursor-pointer select-none">
+                      <div className="relative flex-shrink-0">
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={watchCompany('use_logo_on_login') ?? false}
+                          onChange={e => setValueCompany('use_logo_on_login', e.target.checked)}
+                        />
+                        <div className="w-11 h-6 rounded-full bg-muted transition-colors peer-checked:bg-brand-500" />
+                        <div className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Usar logotipo en inicio de sesión</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Muestra el logo de la empresa en la pantalla de login</p>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* Login Background Section */}
+                  <div className="col-span-1 md:col-span-2 p-4 rounded-xl bg-background/30 border border-border/50 backdrop-blur-md space-y-4">
+                    <label className="block text-sm font-medium text-foreground">
+                      Fondo de inicio de sesión
+                    </label>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-6">
+                      {/* Preview */}
+                      <div className="relative w-32 h-20 rounded-lg overflow-hidden border-2 border-border/50 flex items-center justify-center bg-background/50 flex-shrink-0 shadow">
+                        {watchLoginBgUrl ? (
+                          <img
+                            src={getLogoUrl(watchLoginBgUrl)}
+                            alt="Fondo login"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-brand-900/80 via-surface-50 to-surface-200 flex items-center justify-center">
+                            <p className="text-xs text-muted-foreground text-center px-2">Fondo<br />predeterminado</p>
+                          </div>
+                        )}
+                        {uploadingLoginBg && (
+                          <div className="absolute inset-0 bg-background/80 flex items-center justify-center backdrop-blur-sm">
+                            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex-1 text-center sm:text-left space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                          Suba una imagen para el fondo del panel de bienvenida (PNG, JPG, JPEG, WEBP). Se recomienda una imagen de alta resolución.
+                        </p>
+                        <label
+                          htmlFor="login-bg-file-input"
+                          className={`btn-primary inline-flex items-center gap-2 cursor-pointer text-xs py-2 px-4 select-none ${uploadingLoginBg ? 'opacity-50 pointer-events-none' : ''}`}
+                        >
+                          <Upload className="w-4 h-4" />
+                          Subir Imagen de Fondo
+                        </label>
+                        <input
+                          id="login-bg-file-input"
+                          type="file"
+                          accept="image/png, image/jpeg, image/jpg, image/webp"
+                          className="hidden"
+                          onChange={handleLoginBgUpload}
+                          disabled={uploadingLoginBg}
+                        />
+                        {watchLoginBgUrl && (
+                          <button
+                            type="button"
+                            onClick={() => { setValueCompany('login_bg_url', ''); setIsCompanyDirty(true) }}
+                            className="ml-2 text-xs text-destructive hover:text-destructive/80 transition-colors py-2 px-3 border border-destructive/30 rounded-lg bg-background/20 hover:bg-background/40"
+                          >
+                            Quitar fondo
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-4 py-3 px-4 rounded-xl bg-secondary/20 border border-border/50 cursor-pointer select-none">
+                      <div className="relative flex-shrink-0">
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={watchCompany('use_login_bg') ?? false}
+                          onChange={e => setValueCompany('use_login_bg', e.target.checked)}
+                        />
+                        <div className="w-11 h-6 rounded-full bg-muted transition-colors peer-checked:bg-brand-500" />
+                        <div className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Usar fondo en inicio de sesión</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Imagen personalizada para el panel izquierdo del login</p>
+                      </div>
+                    </label>
                   </div>
 
                   <div className="flex justify-end pt-4">
@@ -909,14 +1057,14 @@ export function SettingsPage() {
                       type="submit"
                       id="save-company-btn"
                       disabled={companyMutation.isPending}
-                      className="btn-primary"
+                      className={isCompanyDirty || companyMutation.isPending ? 'btn-primary' : 'btn-secondary'}
                     >
                       {companyMutation.isPending ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
                         <Save className="w-4 h-4" />
                       )}
-                      {companyMutation.isPending ? 'Guardando...' : 'Guardar Empresa'}
+                      {companyMutation.isPending ? 'Guardando...' : 'Guardar'}
                     </button>
                   </div>
                 </form>
@@ -1026,7 +1174,7 @@ export function SettingsPage() {
                     type="button"
                     onClick={handleSaveMikrotikApi}
                     disabled={mikrotikApiMutation.isPending}
-                    className="btn-primary px-5 disabled:opacity-50"
+                    className={`${mikrotikDirty || mikrotikApiMutation.isPending ? 'btn-primary' : 'btn-secondary'} px-5 disabled:opacity-50`}
                   >
                     {mikrotikApiMutation.isPending
                       ? <Loader2 className="w-4 h-4 animate-spin" />
@@ -1375,11 +1523,13 @@ export function SettingsPage() {
                       localStorage.setItem('wisp_billing_recordatorios_pago', target.recordatoriosPago.checked ? 'true' : 'false')
                       localStorage.setItem('wisp_billing_recordatorio_frecuencia_dias', target.recordatorioFrecuenciaDias.value)
 
+                      setBillingDirty(false)
                       setStatusMessage({
                         type: 'success',
                         text: 'Las políticas de facturación global se actualizaron correctamente.',
                       })
                     }}
+                    onChange={() => setBillingDirty(true)}
                     className="space-y-6"
                   >
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1593,9 +1743,9 @@ export function SettingsPage() {
                     </div>
 
                     <div className="flex justify-end pt-4 border-t border-border/50">
-                      <button type="submit" className="btn-primary">
+                      <button type="submit" className={billingDirty ? 'btn-primary' : 'btn-secondary'}>
                         <Save className="w-4 h-4" />
-                        Guardar Facturación
+                        Guardar
                       </button>
                     </div>
                   </form>
@@ -1626,11 +1776,13 @@ export function SettingsPage() {
                       localStorage.setItem('wisp_suspension_notify_suspendido', target.notifySuspendido.checked ? 'true' : 'false')
                       localStorage.setItem('wisp_suspension_notify_pospuesto', target.notifyPospuesto.checked ? 'true' : 'false')
 
+                      setSuspensionDirty(false)
                       setStatusMessage({
                         type: 'success',
                         text: 'Las políticas de suspensión del servicio fueron actualizadas exitosamente.',
                       })
                     }}
+                    onChange={() => setSuspensionDirty(true)}
                     className="space-y-6"
                   >
                     <div className="space-y-1.5">
@@ -1767,7 +1919,7 @@ export function SettingsPage() {
                     </div>
 
                     <div className="flex justify-end pt-4 border-t border-border/50">
-                      <button type="submit" className="btn-primary">
+                      <button type="submit" className={suspensionDirty ? 'btn-primary' : 'btn-secondary'}>
                         <Save className="w-4 h-4" />
                         Guardar Políticas de Suspensión
                       </button>

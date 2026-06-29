@@ -15,6 +15,9 @@ class CompanyBase(BaseModel):
     email: EmailStr | None = Field(default=None)
     sitio_web: str | None = Field(default=None, max_length=255)
     logo_url: str | None = Field(default=None, max_length=255)
+    use_logo_on_login: bool = False
+    login_bg_url: str | None = Field(default=None, max_length=255)
+    use_login_bg: bool = False
 
 
 class CompanyUpdate(BaseModel):
@@ -25,7 +28,9 @@ class CompanyUpdate(BaseModel):
     email: EmailStr | None = Field(default=None)
     sitio_web: str | None = Field(default=None, max_length=255)
     logo_url: str | None = Field(default=None, max_length=255)
-
+    use_logo_on_login: bool | None = None
+    login_bg_url: str | None = Field(default=None, max_length=255)
+    use_login_bg: bool | None = None
 
 
 class CompanyRead(CompanyBase):
@@ -34,3 +39,13 @@ class CompanyRead(CompanyBase):
     id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+
+
+class CompanyPublic(BaseModel):
+    model_config = {"from_attributes": True}
+
+    nombre: str
+    logo_url: str | None
+    use_logo_on_login: bool
+    login_bg_url: str | None
+    use_login_bg: bool
