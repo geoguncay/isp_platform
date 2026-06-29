@@ -3,6 +3,7 @@
  * Opcionalmente verifica roles.
  */
 import { Navigate, Outlet } from 'react-router-dom'
+import { Loader2 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 
 interface ProtectedRouteProps {
@@ -16,7 +17,16 @@ export function ProtectedRoute({ roles }: ProtectedRouteProps) {
     return <Navigate to="/login" replace />
   }
 
-  if (roles && user && !roles.includes(user.rol)) {
+  // Token existe pero el perfil aún no cargó (fetchMe en curso)
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (roles && !roles.includes(user.rol)) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
