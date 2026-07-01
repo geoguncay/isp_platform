@@ -12,12 +12,37 @@ from app.schemas.pppoe import PPPoESecretRead
 from app.schemas.custom_service import CustomServiceResponse
 
 
+class ClientInventoryItemCreate(BaseModel):
+    inventory_item_id: uuid.UUID
+    cantidad: int = Field(default=1, ge=1)
+    numero_serie: str | None = Field(default=None, max_length=100)
+    mac: str | None = Field(default=None, min_length=17, max_length=17)
+    notas: str | None = None
+
+
+class ClientInventoryItemResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    inventory_item_id: uuid.UUID
+    cantidad: int
+    numero_serie: str | None = None
+    mac: str | None = None
+    notas: str | None = None
+    assigned_at: datetime
+    # Campos del item de inventario
+    item_nombre: str | None = None
+    item_codigo: str | None = None
+    item_modelo: str | None = None
+    item_categoria: str | None = None
+
+
 class ClientBase(BaseModel):
     nombre: str | None = Field(default=None, max_length=120)
     apellidos: str | None = Field(default=None, max_length=60)
     nombres: str | None = Field(default=None, max_length=60)
     cedula: str = Field(min_length=10, max_length=20)
-    telefono: str = Field(min_length=5, max_length=40)
+    telefono: str | None = Field(default=None, max_length=40)
     direccion: str = Field(min_length=5, max_length=255)
     latitud: float | None = None
     longitud: float | None = None
@@ -44,6 +69,7 @@ class ClientBase(BaseModel):
 class ClientCreate(ClientBase):
     plan_id: uuid.UUID | None = None
     custom_service_ids: list[uuid.UUID] | None = None
+    inventory_items: list[ClientInventoryItemCreate] | None = None
     ip: str | None = Field(default=None, min_length=7, max_length=45)
     mac: str | None = Field(default=None, min_length=17, max_length=17)
     notas_ip: str | None = None
@@ -64,6 +90,7 @@ class ClientUpdate(BaseModel):
     apellidos: str | None = Field(default=None, max_length=60)
     nombres: str | None = Field(default=None, max_length=60)
     custom_service_ids: list[uuid.UUID] | None = None
+    inventory_items: list[ClientInventoryItemCreate] | None = None
     cedula: str | None = Field(default=None, min_length=10, max_length=20)
     telefono: str | None = Field(default=None, min_length=5, max_length=40)
     direccion: str | None = Field(default=None, min_length=5, max_length=255)
@@ -147,6 +174,8 @@ class ClientResponse(ClientBase):
     site_id: uuid.UUID | None = None
     site_nombre: str | None = None
     custom_services: list[CustomServiceResponse] = []
+    inventory_items: list[ClientInventoryItemResponse] = []
+    suspension_programada: datetime | None = None
 
 
 # Schema de respuesta de listado de clientes con paginación

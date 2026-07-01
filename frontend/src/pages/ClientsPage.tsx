@@ -1,15 +1,17 @@
 /**
  * ClientsPage — Gestión de clientes del WISP con filtros dinámicos y paginación.
  */
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { ToastContainer } from '@/components/Toast'
+import { useToast } from '@/hooks/useToast'
 import {
   Plus, RefreshCw, Search, Users, Wifi, UserCheck, UserX, UserMinus,
   ChevronRight, Trash2, Edit2, SlidersHorizontal, MapPin, ArrowUpDown, ChevronUp, ChevronDown, Calendar,
   Upload
 } from 'lucide-react'
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import api from '@/services/api'
@@ -19,6 +21,8 @@ import { ClientImportDialog } from '@/components/ClientImportDialog'
 interface Client {
   id: string
   nombre: string
+  apellidos: string | null
+  nombres: string | null
   cedula: string
   telefono: string
   direccion: string
@@ -39,6 +43,8 @@ interface Client {
 interface Router {
   id: string
   nombre: string
+  latitud?: number | null
+  longitud?: number | null
 }
 
 interface Plan {
@@ -62,9 +68,62 @@ const customMarkerIcon = L.icon({
 
 const DEFAULT_CENTER: [number, number] = [-0.180653, -78.467834]
 
+const gatewayMarkerIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="40" height="40">
+      <circle cx="12" cy="12" r="12" fill="%232563eb" opacity="0.15"/>
+      <circle cx="12" cy="12" r="9" fill="none" stroke="%232563eb" stroke-width="1.5" opacity="0.4"/>
+      <path d="M4.93 4.93a10 10 0 0 1 14.14 0M7.76 7.76a6 6 0 0 1 8.49 0M10.59 10.59a2 2 0 0 1 2.83 0" stroke="%232563eb" stroke-width="2" stroke-linecap="round" fill="none"/>
+      <circle cx="12" cy="13" r="1.5" fill="%232563eb"/>
+      <line x1="12" y1="14.5" x2="12" y2="18" stroke="%232563eb" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </div>`,
+  iconSize: [40, 40],
+  iconAnchor: [20, 20],
+  popupAnchor: [0, -22],
+})
+
+function MapController({ clients, selectedGateway, filterKey }: {
+  clients: Client[]
+  selectedGateway: Router | undefined
+  filterKey: string
+}) {
+  const map = useMap()
+  const lastKey = useRef('')
+
+  useEffect(() => {
+    if (lastKey.current === filterKey) return
+    lastKey.current = filterKey
+
+    if (selectedGateway?.latitud != null && selectedGateway?.longitud != null) {
+      map.flyTo([selectedGateway.latitud, selectedGateway.longitud], 14, { duration: 0.8 })
+    } else {
+      const first = clients.find(c => c.latitud && c.longitud)
+      if (first) map.flyTo([first.latitud!, first.longitud!], 14, { duration: 0.8 })
+    }
+  }, [filterKey, selectedGateway, clients, map])
+
+  return null
+}
+
 export function ClientsPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const queryClient = useQueryClient()
+  const { toasts, addToast, removeToast } = useToast()
+  const toastShown = useRef(false)
+
+  // Mostrar toast si venimos de una acción (ej: eliminar cliente)
+  useEffect(() => {
+    if (toastShown.current) return
+    const state = location.state as { toast?: { message: string; type: 'success' | 'error' | 'warning' } } | null
+    if (state?.toast) {
+      toastShown.current = true
+      addToast(state.toast.message, state.toast.type)
+      window.history.replaceState({}, '')
+    }
+  }, [location.state, addToast])
 
   // State de filtros y paginación
   const [search, setSearch] = useState('')
@@ -78,8 +137,8 @@ export function ClientsPage() {
   const limit = 10
 
   // Estados para ordenamiento
-  const [sortField, setSortField] = useState<string>('created_at')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [sortField, setSortField] = useState<string>('apellidos')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   // Modales
   const [formOpen, setFormOpen] = useState(false)
@@ -232,7 +291,18 @@ export function ClientsPage() {
               className="input-field pl-9"
             />
           </div>
-
+          
+          {/* Gateway */}
+          <select
+            value={routerId}
+            onChange={(e) => { setRouterId(e.target.value); setPage(1) }}
+            className="input-field cursor-pointer"
+          >
+            <option value="">Todos los gateways</option>
+            {routers.map((r) => (
+              <option key={r.id} value={r.id}>{r.nombre}</option>
+            ))}
+          </select>
           {/* Sitio */}
           <select
             id="filter-client-site"
@@ -243,18 +313,6 @@ export function ClientsPage() {
             <option value="">Todos los sitios</option>
             {sites.map((s: any) => (
               <option key={s.id} value={s.id}>{s.nombre}</option>
-            ))}
-          </select>
-
-          {/* Router */}
-          <select
-            value={routerId}
-            onChange={(e) => { setRouterId(e.target.value); setPage(1) }}
-            className="input-field cursor-pointer"
-          >
-            <option value="">Todos los routers</option>
-            {routers.map((r) => (
-              <option key={r.id} value={r.id}>{r.nombre}</option>
             ))}
           </select>
 
@@ -328,6 +386,29 @@ export function ClientsPage() {
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
+                <MapController
+                  clients={clientsData.items}
+                  selectedGateway={routers.find(r => r.id === routerId)}
+                  filterKey={`${routerId}-${siteId}`}
+                />
+                {/* Marcador del gateway seleccionado */}
+                {(() => {
+                  const gw = routers.find(r => r.id === routerId)
+                  if (!gw?.latitud || !gw?.longitud) return null
+                  return (
+                    <Marker position={[gw.latitud, gw.longitud]} icon={gatewayMarkerIcon}>
+                      <Popup>
+                        <div className="p-1 font-sans min-w-[160px]">
+                          <p className="font-bold text-sm text-foreground m-0">{gw.nombre}</p>
+                          <p className="text-[11px] text-muted-foreground mt-1 m-0">Gateway · Centro de referencia</p>
+                          <p className="text-[10px] font-mono text-muted-foreground mt-0.5 m-0">
+                            {gw.latitud.toFixed(5)}, {gw.longitud.toFixed(5)}
+                          </p>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  )
+                })()}
                 {clientsData.items
                   .filter((client: Client) => client.latitud && client.longitud)
                   .map((client: Client) => {
@@ -403,10 +484,20 @@ export function ClientsPage() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th onClick={() => handleSort('nombre')} className="cursor-pointer select-none hover:bg-secondary/20 transition-colors">
+                      <th onClick={() => handleSort('apellidos')} className="cursor-pointer select-none hover:bg-secondary/20 transition-colors">
                         <div className="flex items-center gap-1">
-                          <span>Cliente</span>
-                          {sortField === 'nombre' ? (
+                          <span>Apellidos</span>
+                          {sortField === 'apellidos' ? (
+                            sortDir === 'asc' ? <ChevronUp className="w-3.5 h-3.5 text-brand-400" /> : <ChevronDown className="w-3.5 h-3.5 text-brand-400" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 opacity-30" />
+                          )}
+                        </div>
+                      </th>
+                      <th onClick={() => handleSort('nombres')} className="hidden sm:table-cell cursor-pointer select-none hover:bg-secondary/20 transition-colors">
+                        <div className="flex items-center gap-1">
+                          <span>Nombres</span>
+                          {sortField === 'nombres' ? (
                             sortDir === 'asc' ? <ChevronUp className="w-3.5 h-3.5 text-brand-400" /> : <ChevronDown className="w-3.5 h-3.5 text-brand-400" />
                           ) : (
                             <ArrowUpDown className="w-3 h-3 opacity-30" />
@@ -468,7 +559,7 @@ export function ClientsPage() {
                       </th>
                       <th onClick={() => handleSort('router')} className="hidden lg:table-cell cursor-pointer select-none hover:bg-secondary/20 transition-colors">
                         <div className="flex items-center gap-1">
-                          <span>Router</span>
+                          <span>Gateway</span>
                           {sortField === 'router' ? (
                             sortDir === 'asc' ? <ChevronUp className="w-3.5 h-3.5 text-brand-400" /> : <ChevronDown className="w-3.5 h-3.5 text-brand-400" />
                           ) : (
@@ -507,14 +598,16 @@ export function ClientsPage() {
                       >
                         <td>
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-brand-900/30 rounded-lg flex items-center justify-center border border-brand-800/50">
+                            <div className="w-8 h-8 bg-brand-900/30 rounded-lg flex items-center justify-center border border-brand-800/50 shrink-0">
                               <Users className="w-4 h-4 text-brand-400" />
                             </div>
-                            <div>
-                              <p className="font-medium text-foreground text-sm">{client.nombre}</p>
-                              <p className="text-xs text-muted-foreground">{client.telefono}</p>
-                            </div>
+                            <span className="font-semibold text-foreground text-sm">
+                              {client.apellidos || client.nombre}
+                            </span>
                           </div>
+                        </td>
+                        <td className="hidden sm:table-cell text-sm text-muted-foreground">
+                          {client.nombres || <span className="italic opacity-40">—</span>}
                         </td>
                         <td className="hidden md:table-cell font-mono text-xs text-muted-foreground">
                           {client.cedula}
@@ -658,6 +751,9 @@ export function ClientsPage() {
           queryClient.invalidateQueries({ queryKey: ['clients'] })
         }}
       />
+
+      {/* Notificaciones toast */}
+      <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
   )
 }

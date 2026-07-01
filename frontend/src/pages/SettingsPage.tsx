@@ -161,6 +161,16 @@ export function SettingsPage() {
   const [billingDirty, setBillingDirty] = useState(false)
   const [suspensionDirty, setSuspensionDirty] = useState(false)
 
+  // Estados para Fechas de Corte
+  const [fechasCorte, setFechasCorte] = useState<number[]>([])
+  const [newFechaCorteInput, setNewFechaCorteInput] = useState('')
+  const [editingFechaCorteDay, setEditingFechaCorteDay] = useState<number | null>(null)
+  const [editingFechaCorteVal, setEditingFechaCorteVal] = useState('')
+
+  // Estados para Motivos de Suspensión
+  const [suspensionMotivos, setSuspensionMotivos] = useState<string[]>([])
+  const [newMotivo, setNewMotivo] = useState('')
+
   // Estados locales para MikroTik API (sincronizados desde la DB vía useQuery)
   const [mikrotikAttempts, setMikrotikAttempts] = useState(1)
   const [mikrotikTimeout, setMikrotikTimeout] = useState(10)
@@ -264,6 +274,34 @@ export function SettingsPage() {
     return <Navigate to="/dashboard" replace />
   }
 
+  // Cargar Motivos de Suspensión al activar pestaña
+  useEffect(() => {
+    if (activeTab === 'billing' && generalSubTab === 'suspension') {
+      const saved = localStorage.getItem('wisp_suspension_motivos_list')
+      const defaults = ['Falta de pago', 'Solicitud del cliente', 'Mantenimiento', 'Incumplimiento de contrato']
+      if (saved) {
+        try { setSuspensionMotivos(JSON.parse(saved)) } catch { setSuspensionMotivos(defaults) }
+      } else {
+        setSuspensionMotivos(defaults)
+        localStorage.setItem('wisp_suspension_motivos_list', JSON.stringify(defaults))
+      }
+    }
+  }, [activeTab, generalSubTab])
+
+  // Cargar Fechas de Corte al activar pestaña
+  useEffect(() => {
+    if (activeTab === 'billing' && generalSubTab === 'payment_methods') {
+      const saved = localStorage.getItem('wisp_fechas_corte')
+      const defaults = [1, 5, 10, 15, 28]
+      if (saved) {
+        try { setFechasCorte(JSON.parse(saved)) } catch { setFechasCorte(defaults) }
+      } else {
+        setFechasCorte(defaults)
+        localStorage.setItem('wisp_fechas_corte', JSON.stringify(defaults))
+      }
+    }
+  }, [activeTab, generalSubTab])
+
   // Cargar Métodos de Pago al activar pestaña
   useEffect(() => {
     if (activeTab === 'billing' && generalSubTab === 'payment_methods') {
@@ -304,6 +342,29 @@ export function SettingsPage() {
     }
   }, [activeTab])
 
+
+  // ── Handlers Motivos de Suspensión ─────────────────────────────────────────
+  const handleAddMotivo = (e: React.FormEvent) => {
+    e.preventDefault()
+    const val = newMotivo.trim()
+    if (!val) return
+    if (suspensionMotivos.includes(val)) {
+      setStatusMessage({ type: 'error', text: 'Este motivo ya existe.' })
+      return
+    }
+    const updated = [...suspensionMotivos, val]
+    setSuspensionMotivos(updated)
+    localStorage.setItem('wisp_suspension_motivos_list', JSON.stringify(updated))
+    setNewMotivo('')
+    setStatusMessage({ type: 'success', text: `Motivo "${val}" agregado.` })
+  }
+
+  const handleDeleteMotivo = (val: string) => {
+    const updated = suspensionMotivos.filter((m) => m !== val)
+    setSuspensionMotivos(updated)
+    localStorage.setItem('wisp_suspension_motivos_list', JSON.stringify(updated))
+    setStatusMessage({ type: 'success', text: 'Motivo eliminado.' })
+  }
 
   // ── Handlers Colas Padre ────────────────────────────────────────────────────
   const handleAddColaPadre = (e: React.FormEvent) => {
@@ -505,6 +566,49 @@ export function SettingsPage() {
       setUploadingLoginBg(false)
       e.target.value = ''
     }
+  }
+
+  // ── Handlers Fechas de Corte ────────────────────────────────────────────────
+  const handleAddFechaCorte = (e: React.FormEvent) => {
+    e.preventDefault()
+    const val = parseInt(newFechaCorteInput.trim(), 10)
+    if (isNaN(val) || val < 1 || val > 31) {
+      setStatusMessage({ type: 'error', text: 'Ingrese un día válido entre 1 y 31.' })
+      return
+    }
+    if (fechasCorte.includes(val)) {
+      setStatusMessage({ type: 'error', text: `El día ${val} ya está en la lista.` })
+      return
+    }
+    const updated = [...fechasCorte, val].sort((a, b) => a - b)
+    setFechasCorte(updated)
+    localStorage.setItem('wisp_fechas_corte', JSON.stringify(updated))
+    setNewFechaCorteInput('')
+    setStatusMessage({ type: 'success', text: `Día ${val} agregado como fecha de corte.` })
+  }
+
+  const handleDeleteFechaCorte = (day: number) => {
+    const updated = fechasCorte.filter((d) => d !== day)
+    setFechasCorte(updated)
+    localStorage.setItem('wisp_fechas_corte', JSON.stringify(updated))
+    setStatusMessage({ type: 'success', text: `Día ${day} eliminado.` })
+  }
+
+  const handleSaveFechaCorte = (oldDay: number) => {
+    const val = parseInt(editingFechaCorteVal.trim(), 10)
+    if (isNaN(val) || val < 1 || val > 31) {
+      setStatusMessage({ type: 'error', text: 'Ingrese un día válido entre 1 y 31.' })
+      return
+    }
+    if (val !== oldDay && fechasCorte.includes(val)) {
+      setStatusMessage({ type: 'error', text: `El día ${val} ya existe en la lista.` })
+      return
+    }
+    const updated = fechasCorte.map((d) => (d === oldDay ? val : d)).sort((a, b) => a - b)
+    setFechasCorte(updated)
+    localStorage.setItem('wisp_fechas_corte', JSON.stringify(updated))
+    setEditingFechaCorteDay(null)
+    setStatusMessage({ type: 'success', text: `Fecha de corte actualizada a día ${val}.` })
   }
 
   // Metodos de pago handlers
@@ -1838,175 +1942,197 @@ export function SettingsPage() {
               )}
 
               {generalSubTab === 'suspension' && (
-                <div className="glass-card p-6 space-y-6">
+                <div className="space-y-5">
+                  {/* Header */}
                   <div>
                     <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                       <Ban className="w-5 h-5 text-brand-400" />
                       Políticas de Suspensión de Servicio
                     </h3>
                     <p className="text-muted-foreground text-xs mt-1">
-                      Establece las reglas para la suspensión automática por falta de pago y notificaciones de corte del servicio de internet.
+                      Configura los motivos disponibles para suspensiones manuales y define las reglas de suspensión automática por falta de pago.
                     </p>
                   </div>
 
+                  {/* Tarjeta: Motivos */}
+                  <div className="glass-card p-5 border border-border/60 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
+                        <ClipboardList className="w-4 h-4" /> Motivos de Suspensión Manual
+                      </div>
+                      <span className="text-[10px] text-muted-foreground bg-secondary/40 px-2 py-0.5 rounded-full border border-border/40">
+                        {suspensionMotivos.length} configurados
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Razones que aparecerán como opciones en el modal al suspender manualmente un servicio.
+                    </p>
+
+                    {suspensionMotivos.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic p-3 text-center border border-dashed border-border/50 rounded-lg">
+                        No hay motivos configurados. Agrega al menos uno.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {suspensionMotivos.map((motivo) => (
+                          <div key={motivo} className="group flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-lg bg-secondary/40 border border-border/60 text-sm text-foreground hover:border-destructive/40 transition-colors">
+                            <span>{motivo}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteMotivo(motivo)}
+                              className="text-muted-foreground hover:text-destructive transition-colors opacity-40 group-hover:opacity-100"
+                              title="Eliminar motivo"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <form onSubmit={handleAddMotivo} className="flex gap-2 pt-1">
+                      <input
+                        type="text"
+                        value={newMotivo}
+                        onChange={(e) => setNewMotivo(e.target.value)}
+                        placeholder="Agregar nuevo motivo..."
+                        className="input-field flex-1 text-sm"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!newMotivo.trim()}
+                        className="btn-primary px-3 disabled:opacity-40"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Grid: Temporización + Notificaciones */}
                   <form
                     onSubmit={(e) => {
                       e.preventDefault()
                       const target = e.currentTarget as any
-                      localStorage.setItem('wisp_suspension_motivos', target.motivosSuspension.value)
                       localStorage.setItem('wisp_suspension_automatica', target.suspensionAutomatica.checked ? 'true' : 'false')
                       localStorage.setItem('wisp_suspension_hora', target.horaSuspension.value)
                       localStorage.setItem('wisp_suspension_retraso_dias', target.retrasoDias.value)
                       localStorage.setItem('wisp_suspension_permitir_aplazamiento', target.permitirAplazamiento.checked ? 'true' : 'false')
                       localStorage.setItem('wisp_suspension_notify_suspendido', target.notifySuspendido.checked ? 'true' : 'false')
                       localStorage.setItem('wisp_suspension_notify_pospuesto', target.notifyPospuesto.checked ? 'true' : 'false')
-
                       setSuspensionDirty(false)
-                      setStatusMessage({
-                        type: 'success',
-                        text: 'Las políticas de suspensión del servicio fueron actualizadas exitosamente.',
-                      })
+                      setStatusMessage({ type: 'success', text: 'Políticas de suspensión actualizadas correctamente.' })
                     }}
                     onChange={() => setSuspensionDirty(true)}
-                    className="space-y-6"
+                    className="space-y-5"
                   >
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
-                        Motivos de la suspensión manual (separados por comas)
-                      </label>
-                      <input
-                        name="motivosSuspension"
-                        type="text"
-                        defaultValue={localStorage.getItem('wisp_suspension_motivos') || 'Falta de Pago, Solicitud del Cliente, Mantenimiento'}
-                        className="input-field"
-                        placeholder="Falta de Pago, Solicitud del Cliente, Mantenimiento"
-                      />
-                      <span className="text-xs text-muted-foreground block">
-                        Razones válidas para seleccionar al suspender manualmente un servicio.
-                      </span>
-                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
-                          Hora de suspensión (Formato 24h)
-                        </label>
-                        <input
-                          name="horaSuspension"
-                          type="number"
-                          min="0"
-                          max="23"
-                          defaultValue={localStorage.getItem('wisp_suspension_hora') || '0'}
-                          className="input-field font-mono"
-                          placeholder="0"
-                        />
-                        <span className="text-xs text-muted-foreground block">
-                          Hora en formato 24h en la que se ejecutará la suspensión del servicio.
-                        </span>
-                      </div>
+                      {/* Tarjeta: Temporización y Automatización */}
+                      <div className="glass-card p-5 border border-border/60 space-y-5">
+                        <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
+                          <Clock className="w-4 h-4" /> Temporización y Automatización
+                        </div>
 
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
-                          Retraso de suspensión (días)
-                        </label>
-                        <input
-                          name="retrasoDias"
-                          type="number"
-                          min="0"
-                          defaultValue={localStorage.getItem('wisp_suspension_retraso_dias') || '0'}
-                          className="input-field font-mono"
-                          placeholder="0"
-                        />
-                        <span className="text-xs text-muted-foreground block">
-                          Use "0" para suspender el servicio el día inmediato después del vencimiento de la factura.
-                        </span>
-                      </div>
-                    </div>
-
-                    <hr className="border-border/50" />
-
-                    <div className="space-y-4">
-                      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Automatización y Aplazamiento
-                      </h4>
-
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-4">
-                          <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
-                            <input name="suspensionAutomatica" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_automatica') || 'true') === 'true'} className="sr-only peer" />
-                            <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                          </label>
-                          <div>
-                            <span className="text-sm font-medium text-foreground block">
-                              Suspender servicios si el pago está vencido
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
+                              Hora de corte (24h)
+                            </label>
+                            <input
+                              name="horaSuspension"
+                              type="number"
+                              min="0"
+                              max="23"
+                              defaultValue={localStorage.getItem('wisp_suspension_hora') || '0'}
+                              className="input-field font-mono"
+                              placeholder="0"
+                            />
+                            <span className="text-[11px] text-muted-foreground block">
+                              Hora en la que se ejecutará la suspensión.
                             </span>
-                            <span className="text-xs text-muted-foreground">
-                              Cuando está habilitado, los servicios con facturas vencidas se suspenderán de forma automática. Este es el comportamiento por defecto (se puede anular por cliente).
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
+                              Días de gracia
+                            </label>
+                            <input
+                              name="retrasoDias"
+                              type="number"
+                              min="0"
+                              defaultValue={localStorage.getItem('wisp_suspension_retraso_dias') || '0'}
+                              className="input-field font-mono"
+                              placeholder="0"
+                            />
+                            <span className="text-[11px] text-muted-foreground block">
+                              Días extra tras el vencimiento antes de suspender.
                             </span>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-4">
-                          <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
-                            <input name="permitirAplazamiento" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_permitir_aplazamiento') || 'true') === 'true'} className="sr-only peer" />
-                            <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                          </label>
-                          <div>
-                            <span className="text-sm font-medium text-foreground block">
-                              Habilitar el aplazamiento de la suspensión
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              Permite a los clientes aplazar su suspensión por 24 horas. Esto les facilita realizar el pago en línea directamente en la pantalla de suspensión sin loguearse a la Zona de clientes.
-                            </span>
+                        <div className="space-y-3 pt-2 border-t border-border/40">
+                          <div className="flex items-start gap-3">
+                            <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0 mt-0.5">
+                              <input name="suspensionAutomatica" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_automatica') || 'true') === 'true'} className="sr-only peer" />
+                              <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                            </label>
+                            <div>
+                              <span className="text-sm font-medium text-foreground block">Suspensión automática por vencimiento</span>
+                              <span className="text-xs text-muted-foreground">Suspende servicios con facturas vencidas de forma automática (se puede anular por cliente).</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-3">
+                            <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0 mt-0.5">
+                              <input name="permitirAplazamiento" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_permitir_aplazamiento') || 'true') === 'true'} className="sr-only peer" />
+                              <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                            </label>
+                            <div>
+                              <span className="text-sm font-medium text-foreground block">Permitir aplazamiento</span>
+                              <span className="text-xs text-muted-foreground">Muestra la opción de aplazar la suspensión hasta una fecha específica al gestionar un cliente.</span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
 
-                    <hr className="border-border/50" />
-
-                    <div className="space-y-4">
-                      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Notificaciones de Suspensión
-                      </h4>
-
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-4">
-                          <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
-                            <input name="notifySuspendido" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_notify_suspendido') || 'true') === 'true'} className="sr-only peer" />
-                            <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                          </label>
-                          <div>
-                            <span className="text-sm font-medium text-foreground block">
-                              Servicio suspendido
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              Enviar un correo electrónico automático de notificación a los clientes a quienes se les ha suspendido el servicio.
-                            </span>
-                          </div>
+                      {/* Tarjeta: Notificaciones */}
+                      <div className="glass-card p-5 border border-border/60 space-y-5">
+                        <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
+                          <Bell className="w-4 h-4" /> Notificaciones de Suspensión
                         </div>
+                        <p className="text-xs text-muted-foreground">
+                          Configura cuándo enviar notificaciones automáticas por correo electrónico al cliente.
+                        </p>
 
-                        <div className="flex items-center gap-4">
-                          <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
-                            <input name="notifyPospuesto" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_notify_pospuesto') || 'true') === 'true'} className="sr-only peer" />
-                            <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
-                          </label>
-                          <div>
-                            <span className="text-sm font-medium text-foreground block">
-                              La suspensión del servicio ha sido pospuesta
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              Enviar un correo electrónico de notificación cuando se ha pospuesto manualmente la suspensión del cliente desde el panel.
-                            </span>
+                        <div className="space-y-3">
+                          <div className="flex items-start gap-3 p-3 rounded-lg bg-secondary/20 border border-border/40">
+                            <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0 mt-0.5">
+                              <input name="notifySuspendido" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_notify_suspendido') || 'true') === 'true'} className="sr-only peer" />
+                              <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                            </label>
+                            <div>
+                              <span className="text-sm font-medium text-foreground block">Al suspender el servicio</span>
+                              <span className="text-xs text-muted-foreground">Notifica al cliente cuando su servicio ha sido suspendido.</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-3 p-3 rounded-lg bg-secondary/20 border border-border/40">
+                            <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0 mt-0.5">
+                              <input name="notifyPospuesto" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_notify_pospuesto') || 'true') === 'true'} className="sr-only peer" />
+                              <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
+                            </label>
+                            <div>
+                              <span className="text-sm font-medium text-foreground block">Al posponer la suspensión</span>
+                              <span className="text-xs text-muted-foreground">Notifica al cliente cuando la suspensión ha sido aplazada manualmente desde el panel.</span>
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex justify-end pt-4 border-t border-border/50">
+                    <div className="flex justify-end">
                       <button type="submit" className={suspensionDirty ? 'btn-primary' : 'btn-secondary'}>
                         <Save className="w-4 h-4" />
-                        Guardar Políticas de Suspensión
+                        Guardar Políticas
                       </button>
                     </div>
                   </form>
@@ -2133,6 +2259,132 @@ export function SettingsPage() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+
+                  <hr className="border-border/50" />
+
+                  {/* Fechas de Corte */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                        <Hash className="w-5 h-5 text-brand-400" />
+                        Fechas de Corte Disponibles
+                      </h3>
+                      <span className="text-[10px] text-muted-foreground bg-secondary/40 px-2 py-0.5 rounded-full border border-border/40">
+                        {fechasCorte.length} fechas
+                      </span>
+                    </div>
+                    <p className="text-muted-foreground text-xs mb-5">
+                      Define los días del mes disponibles como "Fecha de corte" al registrar o editar un cliente. Los días se ordenan automáticamente.
+                    </p>
+
+                    <form onSubmit={handleAddFechaCorte} className="flex gap-3 max-w-md items-end mb-5">
+                      <div className="flex-1 space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
+                          Nuevo día (1 – 31)
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="31"
+                          value={newFechaCorteInput}
+                          onChange={(e) => setNewFechaCorteInput(e.target.value)}
+                          className="input-field font-mono"
+                          placeholder="Ej: 20"
+                        />
+                      </div>
+                      <button type="submit" className="btn-primary select-none h-11 px-4">
+                        <Plus className="w-4 h-4" />
+                        Agregar
+                      </button>
+                    </form>
+
+                    <div className="border border-border/60 rounded-xl overflow-hidden bg-background/20">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-secondary/40 border-b border-border/60 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                            <th className="px-4 py-3">Día del mes</th>
+                            <th className="px-4 py-3">Etiqueta visible</th>
+                            <th className="px-4 py-3 text-right">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/40 text-sm">
+                          {fechasCorte.length === 0 ? (
+                            <tr>
+                              <td colSpan={3} className="px-4 py-6 text-center text-xs text-muted-foreground italic">
+                                No hay fechas de corte configuradas.
+                              </td>
+                            </tr>
+                          ) : (
+                            fechasCorte.map((dia) => (
+                              <tr key={dia} className="hover:bg-secondary/20 transition-colors">
+                                <td className="px-4 py-3">
+                                  {editingFechaCorteDay === dia ? (
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="31"
+                                      value={editingFechaCorteVal}
+                                      onChange={(e) => setEditingFechaCorteVal(e.target.value)}
+                                      className="input-field py-1 px-2 text-sm font-mono w-24"
+                                      autoFocus
+                                    />
+                                  ) : (
+                                    <span className="font-mono font-bold text-foreground">{String(dia).padStart(2, '0')}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  Día {dia} de cada mes
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <div className="flex justify-end gap-2">
+                                    {editingFechaCorteDay === dia ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSaveFechaCorte(dia)}
+                                          className="p-1 text-emerald-400 hover:bg-emerald-500/10 rounded transition-all cursor-pointer"
+                                          title="Guardar"
+                                        >
+                                          <Check className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingFechaCorteDay(null)}
+                                          className="p-1 text-muted-foreground hover:bg-secondary/50 rounded transition-all cursor-pointer"
+                                          title="Cancelar"
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => { setEditingFechaCorteDay(dia); setEditingFechaCorteVal(String(dia)) }}
+                                          className="p-1 text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded transition-all cursor-pointer"
+                                          title="Editar"
+                                        >
+                                          <Edit2 className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteFechaCorte(dia)}
+                                          className="p-1 text-destructive hover:text-red-400 hover:bg-red-500/10 rounded transition-all cursor-pointer"
+                                          title="Eliminar"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}

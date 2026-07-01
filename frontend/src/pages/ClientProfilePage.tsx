@@ -5,9 +5,9 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowLeft, RefreshCw, MapPin, Phone, Shield, User,
-  Wifi, Calendar, CheckCircle2, XCircle, AlertCircle, Loader2, X, Mail, Plus, MessageSquare,
-  Edit2, Trash2, FileText, Download, UploadCloud, CreditCard, Wallet
+  ArrowLeft, RefreshCw, MapPin, Shield, User,
+  Wifi, CheckCircle2, XCircle, AlertCircle, Loader2, X, Plus, MessageSquare,
+  Edit2, Trash2, FileText, Download, UploadCloud, CreditCard, Wallet, CalendarClock, Ban
 } from 'lucide-react'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
@@ -58,6 +58,25 @@ export function ClientProfilePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [suspendOpen, setSuspendOpen] = useState(false)
   const [suspensionReason, setSuspensionReason] = useState('')
+  const [suspensionMotivos, setSuspensionMotivos] = useState<string[]>([])
+  const [suspensionMode, setSuspensionMode] = useState<'suspend' | 'defer'>('suspend')
+  const [deferDate, setDeferDate] = useState('')
+  const permitirAplazamiento = localStorage.getItem('wisp_suspension_permitir_aplazamiento') !== 'false'
+
+  useEffect(() => {
+    if (suspendOpen) {
+      const saved = localStorage.getItem('wisp_suspension_motivos_list')
+      const defaults = ['Falta de pago', 'Solicitud del cliente', 'Mantenimiento', 'Incumplimiento de contrato']
+      if (saved) {
+        try { setSuspensionMotivos(JSON.parse(saved)) } catch { setSuspensionMotivos(defaults) }
+      } else {
+        setSuspensionMotivos(defaults)
+      }
+      setSuspensionMode('suspend')
+      setSuspensionReason('')
+      setDeferDate('')
+    }
+  }, [suspendOpen])
 
   // Facturas y Recibos
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null)
@@ -97,6 +116,7 @@ export function ClientProfilePage() {
   // Edit and Delete client state & mutation
   const [editOpen, setEditOpen] = useState(false)
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const deleteClientMutation = useMutation({
     mutationFn: async () => {
@@ -104,11 +124,12 @@ export function ClientProfilePage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clients'] })
-      navigate('/clients')
+      navigate('/clients', {
+        state: { toast: { type: 'success', message: `Cliente "${client?.nombre}" eliminado correctamente.` } }
+      })
     },
     onError: (err: any) => {
-      const msg = err?.response?.data?.detail || 'Error al eliminar el cliente de la base de datos'
-      alert(msg)
+      setDeleteError(err?.response?.data?.detail || 'Error al eliminar el cliente de la base de datos')
     }
   })
 
@@ -314,6 +335,38 @@ export function ClientProfilePage() {
     }
   })
 
+  // Mutación para aplazar suspensión a una fecha específica
+  const deferClientMutation = useMutation({
+    mutationFn: async ({ aplazarHasta, motivo }: { aplazarHasta: string; motivo: string }) => {
+      await api.post(`/clients/${id}/defer-suspension`, null, {
+        params: { aplazar_hasta: aplazarHasta, motivo }
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['client', id] })
+      setSuspendOpen(false)
+      setSuspensionReason('')
+      setDeferDate('')
+      setSuspensionMode('suspend')
+    },
+    onError: (err: any) => {
+      alert(err?.response?.data?.detail || 'Error al programar la suspensión')
+    }
+  })
+
+  // Mutación para cancelar una suspensión aplazada
+  const cancelDeferMutation = useMutation({
+    mutationFn: async () => {
+      await api.delete(`/clients/${id}/defer-suspension`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['client', id] })
+    },
+    onError: (err: any) => {
+      alert(err?.response?.data?.detail || 'Error al cancelar el aplazamiento')
+    }
+  })
+
   // Mutación para reactivar cliente
   const reactivateClientMutation = useMutation({
     mutationFn: async () => {
@@ -433,13 +486,40 @@ export function ClientProfilePage() {
 
             {/* Badge de estado y toggle */}
             <div className="absolute top-6 right-6 flex items-center gap-3">
-              <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${client.activo
-                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/25'
-                : 'bg-rose-500/10 text-rose-400 border border-rose-500/25'
-                }`}>
-                {client.activo ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
-                {client.activo ? 'Activo' : 'Suspendido'}
-              </span>
+              {/* Badge */}
+              {client.activo && client.suspension_programada ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25">
+                  <CalendarClock className="w-3.5 h-3.5" />
+                  Programado
+                </span>
+              ) : client.activo ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Activo
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/25">
+                  <XCircle className="w-3.5 h-3.5" />
+                  Suspendido
+                </span>
+              )}
+
+              {/* Botón cancelar aplazamiento (solo si hay suspensión programada) */}
+              {client.activo && client.suspension_programada && (
+                <button
+                  onClick={() => {
+                    if (confirm('¿Cancelar la suspensión programada? El cliente permanecerá activo.')) {
+                      cancelDeferMutation.mutate()
+                    }
+                  }}
+                  disabled={cancelDeferMutation.isPending}
+                  className="text-xs px-2.5 py-1.5 rounded-lg border font-medium active:scale-[0.98] transition-all duration-200 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/25"
+                >
+                  {cancelDeferMutation.isPending ? 'Cancelando...' : 'Cancelar aplazamiento'}
+                </button>
+              )}
+
+              {/* Botón principal Suspender / Reactivar */}
               <button
                 onClick={handleToggleStatus}
                 disabled={suspendClientMutation.isPending || reactivateClientMutation.isPending}
@@ -612,6 +692,40 @@ export function ClientProfilePage() {
                   </div>
                 </div>
               </div>
+
+              {/* Banner: Suspensión programada */}
+              {client.activo && client.suspension_programada && (
+                <div className="flex items-start justify-between gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 animate-fade-in">
+                  <div className="flex items-start gap-2.5">
+                    <CalendarClock className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+                    <div>
+                      <span className="text-xs font-semibold text-amber-300 block">Suspensión programada</span>
+                      <span className="text-xs text-amber-400/80">
+                        Este cliente será suspendido automáticamente el{' '}
+                        <strong className="text-amber-200">
+                          {new Date(client.suspension_programada).toLocaleDateString(undefined, {
+                            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                          })}
+                        </strong>{' '}
+                        a las{' '}
+                        <strong className="text-amber-200">
+                          {new Date(client.suspension_programada).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </strong>.
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm('¿Cancelar la suspensión programada?')) cancelDeferMutation.mutate()
+                    }}
+                    disabled={cancelDeferMutation.isPending}
+                    className="shrink-0 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
 
               {/* Estado de la Sesión en tiempo real (solo si es pppoe) */}
               {client.tipo === 'pppoe' && (
@@ -1524,17 +1638,25 @@ export function ClientProfilePage() {
               <AlertCircle className="w-6 h-6" />
               <h3 className="text-lg font-semibold">¿Eliminar cliente definitivamente?</h3>
             </div>
-            <p className="text-muted-foreground text-sm mb-6 leading-relaxed">
+            <p className="text-muted-foreground text-sm mb-4 leading-relaxed">
               Esta acción es <strong>irreversible</strong> y eliminará al cliente <strong>{client.nombre}</strong> de la base de datos de manera permanente, junto con todo su historial.
             </p>
+            {deleteError && (
+              <div className="flex items-start gap-2 bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2.5 mb-4">
+                <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                <p className="text-xs text-destructive leading-snug">{deleteError}</p>
+              </div>
+            )}
             <div className="flex gap-3">
               <button
-                onClick={() => setConfirmDeleteOpen(false)}
+                type="button"
+                onClick={() => { setConfirmDeleteOpen(false); setDeleteError(null) }}
                 className="btn-secondary flex-1 justify-center"
               >
                 Cancelar
               </button>
               <button
+                type="button"
                 onClick={() => deleteClientMutation.mutate()}
                 disabled={deleteClientMutation.isPending}
                 className="btn-destructive flex-1 justify-center"
@@ -1546,77 +1668,144 @@ export function ClientProfilePage() {
         </div>
       )}
 
-      {/* Modal Confirmar Suspensión */}
+      {/* Modal Suspender / Aplazar Servicio */}
       {suspendOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="glass-card w-full max-w-sm mx-4 animate-fade-in border border-rose-500/20">
-            <div className="flex items-center gap-2.5 text-rose-400 p-5 border-b border-border">
-              <XCircle className="w-5 h-5" />
-              <h2 className="text-lg font-semibold">Suspender Servicio</h2>
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <div className="flex items-center gap-2.5 text-rose-400">
+                <XCircle className="w-5 h-5" />
+                <h2 className="text-lg font-semibold">Suspender / Aplazar</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSuspendOpen(false)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            
+
+            {/* Selector de modo (solo si el ajuste está activo) */}
+            {permitirAplazamiento && (
+              <div className="flex gap-1 p-4 pb-0">
+                <button
+                  type="button"
+                  onClick={() => setSuspensionMode('suspend')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold border transition-all ${
+                    suspensionMode === 'suspend'
+                      ? 'bg-rose-500/15 border-rose-500/40 text-rose-400'
+                      : 'bg-secondary/30 border-border/50 text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Ban className="w-3.5 h-3.5" />
+                  Suspender ahora
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSuspensionMode('defer')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold border transition-all ${
+                    suspensionMode === 'defer'
+                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                      : 'bg-secondary/30 border-border/50 text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <CalendarClock className="w-3.5 h-3.5" />
+                  Aplazar
+                </button>
+              </div>
+            )}
+
             <form
               onSubmit={(e) => {
                 e.preventDefault()
                 if (!suspensionReason.trim()) return
-                suspendClientMutation.mutate(suspensionReason)
+                if (suspensionMode === 'defer') {
+                  if (!deferDate) return
+                  deferClientMutation.mutate({ aplazarHasta: deferDate, motivo: suspensionReason })
+                } else {
+                  suspendClientMutation.mutate(suspensionReason)
+                }
               }}
               className="p-5 space-y-4"
             >
               <p className="text-muted-foreground text-xs leading-relaxed">
-                El servicio del cliente <strong>{client.nombre}</strong> será suspendido en la base de datos y se bloqueará su acceso en el router MikroTik.
+                {suspensionMode === 'defer'
+                  ? <>El servicio de <strong>{client.nombre}</strong> permanecerá activo hasta la fecha seleccionada, momento en que se suspenderá automáticamente.</>
+                  : <>El servicio de <strong>{client.nombre}</strong> será suspendido inmediatamente y se bloqueará su acceso en el router MikroTik.</>
+                }
               </p>
 
+              {/* Fecha de aplazamiento (solo en modo defer) */}
+              {suspensionMode === 'defer' && (
+                <div>
+                  <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                    Aplazar hasta
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={deferDate}
+                    onChange={(e) => setDeferDate(e.target.value)}
+                    required
+                    min={new Date(Date.now() + 60000).toISOString().slice(0, 16)}
+                    className="input-field font-mono cursor-pointer"
+                  />
+                </div>
+              )}
+
+              {/* Motivo */}
               <div>
                 <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
-                  Motivo de la Suspensión
+                  Motivo
                 </label>
-                <input
-                  type="text"
+                <select
                   value={suspensionReason}
                   onChange={(e) => setSuspensionReason(e.target.value)}
-                  placeholder="Ej: Falta de pago mensual, Solicitud temporal..."
                   required
-                  className="input-field"
-                />
-              </div>
-
-              {/* Botones de Selección Rápida */}
-              <div className="space-y-1.5">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Sugerencias rápidas
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {['Falta de pago', 'Retiro voluntario', 'Incumplimiento de contrato'].map((reason) => (
-                    <button
-                      key={reason}
-                      type="button"
-                      onClick={() => setSuspensionReason(reason)}
-                      className="px-2 py-1 text-[10px] font-medium rounded bg-secondary hover:bg-secondary/80 border border-border/60 text-foreground transition-all duration-150"
-                    >
-                      {reason}
-                    </button>
+                  className="input-field cursor-pointer"
+                >
+                  <option value="">— Seleccione un motivo —</option>
+                  {suspensionMotivos.map((motivo) => (
+                    <option key={motivo} value={motivo}>{motivo}</option>
                   ))}
-                </div>
+                </select>
+                {suspensionMotivos.length === 0 && (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    No hay motivos configurados. Ve a Ajustes → Facturación → Suspensión para agregarlos.
+                  </p>
+                )}
               </div>
 
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setSuspendOpen(false)
-                    setSuspensionReason('')
-                  }}
+                  onClick={() => setSuspendOpen(false)}
                   className="btn-secondary flex-1 justify-center"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  disabled={suspendClientMutation.isPending || !suspensionReason.trim()}
-                  className="btn-primary flex-1 justify-center bg-rose-600 hover:bg-rose-700 text-white"
+                  disabled={
+                    suspendClientMutation.isPending ||
+                    deferClientMutation.isPending ||
+                    !suspensionReason.trim() ||
+                    (suspensionMode === 'defer' && !deferDate)
+                  }
+                  className={`flex-1 justify-center inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all disabled:opacity-50 ${
+                    suspensionMode === 'defer'
+                      ? 'bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-400'
+                      : 'bg-rose-600 hover:bg-rose-700 text-white border border-rose-700'
+                  }`}
                 >
-                  {suspendClientMutation.isPending ? 'Suspendiendo...' : 'Confirmar'}
+                  {(suspendClientMutation.isPending || deferClientMutation.isPending) && (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  )}
+                  {suspendClientMutation.isPending || deferClientMutation.isPending
+                    ? 'Procesando...'
+                    : suspensionMode === 'defer' ? 'Programar Suspensión' : 'Suspender Ahora'
+                  }
                 </button>
               </div>
             </form>

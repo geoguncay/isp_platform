@@ -18,3 +18,5 @@ from app.models.supplier import Supplier
 from app.models.inventory import InventoryItem
 from app.models.system_settings import SystemSettings
 from app.models.audit_log import AuditLog
+from app.models.client_inventory import ClientInventoryItem
+from app.models.mikrotik_sync_queue import MikroTikSyncQueue

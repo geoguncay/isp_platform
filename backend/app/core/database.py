@@ -154,6 +154,36 @@ def run_migrations(bind_engine) -> None:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_entidad_tipo ON audit_logs(entidad_tipo);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_entidad_id ON audit_logs(entidad_id);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at ON audit_logs(created_at DESC);"))
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS client_inventory_items (
+                id VARCHAR(36) PRIMARY KEY,
+                client_id VARCHAR(36) NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+                inventory_item_id VARCHAR(36) NOT NULL REFERENCES inventory_items(id) ON DELETE RESTRICT,
+                cantidad INTEGER NOT NULL DEFAULT 1,
+                numero_serie VARCHAR(100),
+                mac VARCHAR(17),
+                notas TEXT,
+                assigned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_client_inventory_items_client_id ON client_inventory_items(client_id);"))
+            conn.execute(text("ALTER TABLE clients ALTER COLUMN telefono DROP NOT NULL;"))
+            conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS suspension_programada TIMESTAMP WITH TIME ZONE;"))
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS mikrotik_sync_queue (
+                id          UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+                gateway_id  UUID NOT NULL REFERENCES gateways(id) ON DELETE CASCADE,
+                client_id   UUID REFERENCES clients(id) ON DELETE SET NULL,
+                operation   VARCHAR(50) NOT NULL,
+                payload     JSONB NOT NULL DEFAULT '{}',
+                status      VARCHAR(20) NOT NULL DEFAULT 'pending',
+                attempts    INTEGER NOT NULL DEFAULT 0,
+                last_error  TEXT,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                next_retry_at TIMESTAMPTZ
+            );
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_msq_gateway_status ON mikrotik_sync_queue(gateway_id, status);"))
 
             # Renombrar columna router_id → gateway_id en cada tabla relacionada
             conn.execute(text("""

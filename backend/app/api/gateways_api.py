@@ -661,6 +661,56 @@ def get_router_pppoe_sessions(gateway_id: uuid.UUID, db: DBSession, _: AdminOrTe
         )
 
 
+@router.post("/{gateway_id}/sync-pending", response_model=dict)
+def sync_pending_mikrotik(gateway_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -> dict:
+    """
+    Procesa la cola de operaciones MikroTik pendientes para este gateway.
+    Se invoca manualmente o de forma automática al detectar que el gateway volvió a estar en línea.
+    """
+    from app.services.mikrotik.sync_queue import process_pending_queue, get_pending_count
+    r = db.get(Gateway, gateway_id)
+    if not r or not r.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gateway no encontrado")
+    pending_before = get_pending_count(gateway_id, db)
+    if pending_before == 0:
+        return {"processed": 0, "failed": 0, "total": 0, "message": "No hay operaciones pendientes."}
+    result = process_pending_queue(r, db)
+    return {**result, "message": f"Cola procesada: {result['processed']} exitosos, {result['failed']} fallidos."}
+
+
+@router.get("/{gateway_id}/sync-pending", response_model=dict)
+async def get_sync_pending_count(gateway_id: uuid.UUID, db: DBSession, _: AdminOrTecnico) -> dict:
+    """Devuelve el número de operaciones MikroTik pendientes para este gateway."""
+    from app.services.mikrotik.sync_queue import get_pending_count
+    from app.models.mikrotik_sync_queue import MikroTikSyncQueue
+    r = db.get(Gateway, gateway_id)
+    if not r:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gateway no encontrado")
+    items = (
+        db.query(MikroTikSyncQueue)
+        .filter(MikroTikSyncQueue.gateway_id == gateway_id)
+        .filter(MikroTikSyncQueue.status.in_(["pending", "failed", "done"]))
+        .order_by(MikroTikSyncQueue.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return {
+        "pending_count": get_pending_count(gateway_id, db),
+        "items": [
+            {
+                "id": str(i.id),
+                "operation": i.operation,
+                "status": i.status,
+                "attempts": i.attempts,
+                "last_error": i.last_error,
+                "created_at": i.created_at.isoformat() if i.created_at else None,
+                "next_retry_at": i.next_retry_at.isoformat() if i.next_retry_at else None,
+            }
+            for i in items
+        ],
+    }
+
+
 @router.delete("/{gateway_id}/pppoe-sessions/{username}", response_model=dict)
 def delete_router_pppoe_session(gateway_id: uuid.UUID, username: str, db: DBSession, _: AdminOrTecnico) -> dict:
     """

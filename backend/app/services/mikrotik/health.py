@@ -83,6 +83,11 @@ async def check_gateway_health(gateway: Gateway) -> GatewayStatus:
                     accion,
                 )
                 logger.info(f"Connectivity change logged: {gateway.nombre} {old_cached.status} → {new_status_val}")
+
+                # ── Al recuperar conexión, procesar la cola de sync pendiente ──
+                if new_status_val == "online":
+                    await asyncio.to_thread(_process_sync_queue_for_gateway, gateway)
+
         except Exception as exc:
             logger.error(f"Error al registrar cambio de conectividad para {gateway.nombre}: {exc}")
 
@@ -113,6 +118,25 @@ async def get_cached_gateway_status(gateway_id: str) -> GatewayStatus | None:
     if data is None:
         return None
     return GatewayStatus.model_validate_json(data)
+
+
+def _process_sync_queue_for_gateway(gateway: Gateway) -> None:
+    """
+    Lanzado en un thread cuando el gateway pasa de offline → online.
+    Abre su propia sesión de BD para no interferir con el contexto async.
+    """
+    try:
+        from app.core.database import SessionLocal
+        from app.services.mikrotik.sync_queue import process_pending_queue
+        with SessionLocal() as db:
+            result = process_pending_queue(gateway, db)
+            if result["total"] > 0:
+                logger.info(
+                    f"[SyncQueue auto] {gateway.nombre}: "
+                    f"{result['processed']} procesados, {result['failed']} fallidos de {result['total']}"
+                )
+    except Exception as exc:
+        logger.error(f"[SyncQueue auto] Error procesando cola para {gateway.nombre}: {exc}")
 
 
 # Compatibility aliases for legacy code

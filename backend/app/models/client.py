@@ -28,7 +28,7 @@ class Client(Base):
     apellidos: Mapped[str] = mapped_column(String(60), nullable=False, default="")
     nombres: Mapped[str] = mapped_column(String(60), nullable=False, default="")
     cedula: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
-    telefono: Mapped[str] = mapped_column(String(40), nullable=False)
+    telefono: Mapped[str | None] = mapped_column(String(40), nullable=True)
     direccion: Mapped[str] = mapped_column(String(255), nullable=False)
     latitud: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitud: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -45,6 +45,7 @@ class Client(Base):
     auto_aplicar_pago: Mapped[bool] = mapped_column(Boolean, default=True)
     usar_credito_auto: Mapped[bool] = mapped_column(Boolean, default=True)
     prorrateo_separado: Mapped[bool] = mapped_column(Boolean, default=True)
+    suspension_programada: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -64,6 +65,7 @@ class Client(Base):
     invoices = relationship("Invoice", back_populates="client", cascade="all, delete-orphan")
     tickets = relationship("ClientTicket", back_populates="client", cascade="all, delete-orphan")
     custom_services = relationship("CustomService", secondary=client_custom_services_association)
+    inventory_items = relationship("ClientInventoryItem", back_populates="client", cascade="all, delete-orphan")
 
     @property
     def router(self):

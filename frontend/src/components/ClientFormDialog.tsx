@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useForm, Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { X, Loader2, MapPin, User, CreditCard, Bell, Wifi, Check, Layers } from 'lucide-react'
+import { X, Loader2, MapPin, User, CreditCard, Bell, Wifi, Check, Layers, Package, Plus } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
@@ -55,6 +55,25 @@ interface FormCustomService {
   activo: boolean
 }
 
+interface InventoryItemOption {
+  id: string
+  nombre: string
+  codigo: string
+  modelo: string | null
+  categoria: string | null
+  cantidad: number
+}
+
+interface SelectedInventoryItem {
+  inventory_item_id: string
+  item_nombre: string
+  item_codigo: string
+  cantidad: number
+  numero_serie: string
+  mac: string
+  notas: string
+}
+
 const splitClientName = (fullName: string) => {
   const trimmed = (fullName || '').trim()
   if (trimmed.includes(',')) {
@@ -90,7 +109,7 @@ const clientSchema = z.object({
   nombre: z.string().optional(),
   tipo_documento: z.enum(['cedula', 'ruc']),
   cedula: z.string(),
-  telefono: z.string().min(5, 'Mínimo 5 caracteres').max(40),
+  telefono: z.string().max(40).optional().or(z.literal('')),
   direccion: z.string().min(5, 'Mínimo 5 caracteres').max(255),
   latitud: z.coerce.number().optional().nullable(),
   longitud: z.coerce.number().optional().nullable(),
@@ -105,7 +124,7 @@ const clientSchema = z.object({
   usuario_ppp: z.string().optional().nullable(),
   contraseña_ppp: z.string().optional().nullable(),
   perfil_id: z.string().optional().nullable(),
-  email: z.string().email('Ingrese un correo válido').optional().or(z.literal('')),
+  email: z.string().min(1, 'El correo electrónico es obligatorio').email('Ingrese un correo válido'),
   created_at: z.string().optional().nullable(),
   inicio_facturacion: z.string().optional().nullable(),
   dia_inicio_periodo: z.coerce.number().min(1).max(31).optional().nullable(),
@@ -247,6 +266,16 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
   const [methods, setMethods] = useState<{ value: string; label: string }[]>([])
+  const [fechasCorte, setFechasCorte] = useState<number[]>([1, 5, 10, 15, 28])
+
+  // Estado para equipos de inventario asignados
+  const [selectedInventoryItems, setSelectedInventoryItems] = useState<SelectedInventoryItem[]>([])
+  const [showAddEquipment, setShowAddEquipment] = useState(false)
+  const [newEquipmentItemId, setNewEquipmentItemId] = useState('')
+  const [newEquipmentCantidad, setNewEquipmentCantidad] = useState(1)
+  const [newEquipmentSerie, setNewEquipmentSerie] = useState('')
+  const [newEquipmentMac, setNewEquipmentMac] = useState('')
+  const [newEquipmentNotas, setNewEquipmentNotas] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -265,6 +294,11 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
         }
       }
       setMethods(loadedMethods)
+
+      const savedFechas = localStorage.getItem('wisp_fechas_corte')
+      if (savedFechas) {
+        try { setFechasCorte(JSON.parse(savedFechas)) } catch { /* keep defaults */ }
+      }
     }
   }, [open])
 
@@ -283,6 +317,13 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
   const latVal = watch('latitud')
   const lngVal = watch('longitud')
   const watchDocType = watch('tipo_documento')
+  const watchCedula = watch('cedula')
+
+  useEffect(() => {
+    if (watchCedula) {
+      setValue('tipo_documento', watchCedula.length === 13 ? 'ruc' : 'cedula')
+    }
+  }, [watchCedula, setValue])
 
   // Obtener Routers
   const { data: routers = [] } = useQuery<FormRouter[]>({
@@ -299,6 +340,16 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
     queryKey: ['plans-form'],
     queryFn: async () => {
       const { data } = await api.get('/plans')
+      return data
+    },
+    enabled: open,
+  })
+
+  // Obtener artículos de inventario para asignar
+  const { data: inventoryItems = [] } = useQuery<InventoryItemOption[]>({
+    queryKey: ['inventory-form'],
+    queryFn: async () => {
+      const { data } = await api.get('/inventory')
       return data
     },
     enabled: open,
@@ -337,6 +388,8 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
   const nextInvoiceTotal = Number(activePlanPrice) + recurringCustomServicesPrice + oneTimeCustomServicesPrice
   const futureMonthlyTotal = Number(activePlanPrice) + recurringCustomServicesPrice
 
+  const watchDiaPago = watch('dia_pago')
+  const watchCreatedAt = watch('created_at')
   const watchInicioFacturacion = watch('inicio_facturacion')
   const watchDiaInicioPeriodo = watch('dia_inicio_periodo')
   const watchTipoFacturacion = watch('tipo_facturacion')
@@ -606,11 +659,10 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
       const todayStr = `${yyyy}-${mm}-${dd}`
 
       if (client) {
-        const nameParts = splitClientName(client.nombre)
         reset({
           id: client.id,
-          apellidos: nameParts.apellidos,
-          nombres: nameParts.nombres,
+          apellidos: client.apellidos ?? '',
+          nombres: client.nombres ?? '',
           nombre: client.nombre,
           tipo_documento: client.cedula?.length === 13 ? 'ruc' : 'cedula',
           cedula: client.cedula,
@@ -639,13 +691,24 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           auto_aplicar_pago: client.auto_aplicar_pago ?? true,
           usar_credito_auto: client.usar_credito_auto ?? true,
           prorrateo_separado: client.prorrateo_separado ?? true,
-          dia_pago: '5',
+          dia_pago: 'registro',
           metodo_pago: 'transferencia',
           notif_email: true,
           notif_sms: false,
           notif_whatsapp: true,
           custom_service_ids: client.custom_services?.map((cs: any) => cs.id) ?? [],
         })
+        setSelectedInventoryItems(
+          (client as any).inventory_items?.map((a: any) => ({
+            inventory_item_id: a.inventory_item_id,
+            item_nombre: a.item_nombre ?? '',
+            item_codigo: a.item_codigo ?? '',
+            cantidad: a.cantidad ?? 1,
+            numero_serie: a.numero_serie ?? '',
+            mac: a.mac ?? '',
+            notas: a.notas ?? '',
+          })) ?? []
+        )
       } else {
         reset({
           id: undefined,
@@ -677,13 +740,14 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
           auto_aplicar_pago: true,
           usar_credito_auto: true,
           prorrateo_separado: true,
-          dia_pago: '5',
+          dia_pago: 'registro',
           metodo_pago: 'transferencia',
           notif_email: true,
           notif_sms: false,
           notif_whatsapp: true,
           custom_service_ids: [],
         })
+        setSelectedInventoryItems([])
         handleGetLocation()
       }
     }
@@ -698,6 +762,13 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
       if (!payload.custom_service_ids) {
         payload.custom_service_ids = []
       }
+      payload.inventory_items = selectedInventoryItems.map(item => ({
+        inventory_item_id: item.inventory_item_id,
+        cantidad: item.cantidad,
+        numero_serie: item.numero_serie || null,
+        mac: item.mac || null,
+        notas: item.notas || null,
+      }))
       delete payload.tipo_documento
       delete payload.dia_pago
       delete payload.metodo_pago
@@ -708,6 +779,11 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
       if (!payload.plan_id) delete payload.plan_id
       if (payload.latitud === 0 || isNaN(Number(payload.latitud))) payload.latitud = null
       if (payload.longitud === 0 || isNaN(Number(payload.longitud))) payload.longitud = null
+
+      const telefonoStr = payload.telefono as string | null | undefined
+      if (!telefonoStr || telefonoStr.trim() === '') {
+        payload.telefono = null
+      }
 
       const emailStr = payload.email as string | null | undefined
       if (!emailStr || emailStr.trim() === '') {
@@ -733,8 +809,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
         payload.mac = null
         payload.notas_ip = null
       } else {
-        const macStr = payload.mac as string | null | undefined
-        if (!macStr || macStr.trim() === '') payload.mac = null
+        payload.mac = null
         const notasIpStr = payload.notas_ip as string | null | undefined
         if (!notasIpStr || notasIpStr.trim() === '') payload.notas_ip = null
         payload.usuario_ppp = null
@@ -743,8 +818,12 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
       }
 
       if (isEdit) {
-        delete payload.plan_id // No modificamos plan_id vía update cliente directamente (se hace desde perfil)
+        const planIdToAssign = (!client?.plan_activo && payload.plan_id) ? payload.plan_id : null
+        delete payload.plan_id
         await api.put(`/clients/${client!.id}`, payload)
+        if (planIdToAssign) {
+          await api.post(`/clients/${client!.id}/assign-plan`, null, { params: { plan_id: planIdToAssign } })
+        }
       } else {
         await api.post('/clients', payload)
       }
@@ -977,32 +1056,28 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                   </div>
                 </div>
 
-                {/* Tipo Identificación, Identificación y Teléfono */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-1.5">Tipo Doc. *</label>
-                    <select
-                      {...register('tipo_documento')}
-                      className="input-field cursor-pointer"
-                    >
-                      <option value="cedula">Cédula</option>
-                      <option value="ruc">RUC</option>
-                    </select>
-                  </div>
+                {/* Cédula/RUC y Teléfono */}
+                <input type="hidden" {...register('tipo_documento')} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1.5">
-                      {watchDocType === 'ruc' ? 'RUC *' : 'Cédula *'}
+                      Cédula / RUC *{' '}
+                      {watchCedula && watchCedula.length > 0 && (
+                        <span className="ml-1 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-brand-500/10 text-brand-400 border border-brand-500/20">
+                          {watchDocType === 'ruc' ? 'RUC' : 'Cédula'}
+                        </span>
+                      )}
                     </label>
                     <input
                       type="text"
-                      placeholder={watchDocType === 'ruc' ? '1724024888001' : '1724024888'}
+                      placeholder="Cédula (10 dígitos) o RUC (13 dígitos)"
                       {...register('cedula')}
                       className="input-field font-mono"
                     />
                     {errors.cedula && <p className="text-xs text-destructive mt-1">{errors.cedula.message}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-1.5">Teléfono *</label>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">Teléfono </label>
                     <input
                       type="text"
                       placeholder="0999999999"
@@ -1016,7 +1091,7 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                 {/* Correo Electrónico y Fecha de Registro */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-1.5">Correo Electrónico <span className="text-muted-foreground text-xs">(opcional)</span></label>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">Correo Electrónico *</label>
                     <input
                       type="email"
                       placeholder="ejemplo@correo.com"
@@ -1159,9 +1234,9 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                 <Layers className="w-4 h-4" /> Selección de Plan y Servicios Adicionales
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-5">
                 {/* Selección de Plan */}
-                <div className="glass-card p-5 border border-border/60 bg-secondary/10 md:col-span-1 space-y-4">
+                <div className="glass-card p-5 border border-border/60 bg-secondary/10 md:col-span-3 space-y-4">
                   {!isEdit ? (
                     <div>
                       <label className="block text-sm font-semibold text-brand-400 uppercase tracking-wider mb-2">
@@ -1196,11 +1271,6 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                                 <span>📤 Up: {selectedPlanObj.velocidad_up_mbps || 0} Mbps</span>
                               </div>
                             )}
-                            {selectedPlanObj.descripcion && (
-                              <div className="text-[10px] text-muted-foreground italic pt-1 border-t border-border/20">
-                                {selectedPlanObj.descripcion}
-                              </div>
-                            )}
                           </div>
                         )
                       })()}
@@ -1211,28 +1281,82 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                         Plan Contratado Actual
                       </label>
                       {client?.plan_activo ? (
-                        <div className="bg-brand-500/5 border border-brand-500/20 rounded-xl p-3.5 space-y-1">
-                          <div className="text-xs font-bold text-foreground">
-                            {client.plan_activo.nombre}
+                        <>
+                          <div className="bg-brand-500/5 border border-brand-500/20 rounded-xl p-3.5 space-y-1">
+                            <div className="text-xs font-bold text-foreground">
+                              {client.plan_activo.nombre}
+                            </div>
+                            <div className="text-xs font-mono font-bold text-brand-400">
+                              ${Number(client.plan_activo.precio).toFixed(2)}/mes
+                            </div>
                           </div>
-                          <div className="text-xs font-mono font-bold text-brand-400">
-                            ${Number(client.plan_activo.precio).toFixed(2)}/mes
+                          <div className="bg-brand-500/10 border border-brand-500/20 rounded-lg p-3 text-[11px] text-brand-300 leading-relaxed">
+                            ℹ️ Para modificar el plan activo o aplicar promociones, dirígete al perfil del cliente una vez guardados los cambios.
                           </div>
-                        </div>
+                        </>
                       ) : (
-                        <div className="text-xs text-muted-foreground italic bg-secondary/20 p-3 rounded-xl border border-border/40 text-center">
-                          Sin plan activo asignado
-                        </div>
+                        <>
+                          <div className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 font-medium">
+                            Sin plan activo — selecciona uno para asignarlo al guardar.
+                          </div>
+                          <select {...register('plan_id')} className="input-field cursor-pointer font-sans">
+                            <option value="">Sin plan (asignar después)</option>
+                            {plans.map((p) => (
+                              <option key={p.id} value={p.id}>{p.nombre} (${Number(p.precio).toFixed(2)})</option>
+                            ))}
+                          </select>
+                          {(() => {
+                            const selectedPlanObj = plans.find((p) => p.id === selectedPlanId)
+                            if (!selectedPlanObj) return null
+                            return (
+                              <div className="bg-brand-500/5 border border-brand-500/20 rounded-xl p-3.5 space-y-1.5 animate-fade-in">
+                                <div className="text-[10px] font-bold text-brand-300 uppercase tracking-wider">Detalle del Plan</div>
+                                <div className="text-xs font-bold text-foreground">{selectedPlanObj.nombre}</div>
+                                <div className="text-xs font-mono font-bold text-brand-400">${Number(selectedPlanObj.precio).toFixed(2)}/mes</div>
+                                {(selectedPlanObj.velocidad_down_mbps !== undefined || selectedPlanObj.velocidad_up_mbps !== undefined) && (
+                                  <div className="text-[10px] text-muted-foreground flex gap-3 font-medium">
+                                    <span>📥 Down: {selectedPlanObj.velocidad_down_mbps || 0} Mbps</span>
+                                    <span>📤 Up: {selectedPlanObj.velocidad_up_mbps || 0} Mbps</span>
+                                  </div>
+                                )}
+                                {selectedPlanObj.descripcion && (
+                                  <div className="text-[10px] text-muted-foreground italic pt-1 border-t border-border/20">
+                                    {selectedPlanObj.descripcion}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
+                        </>
                       )}
-                      <div className="bg-brand-500/10 border border-brand-500/20 rounded-lg p-3 text-[11px] text-brand-300 leading-relaxed">
-                        ℹ️ Para modificar el plan activo o aplicar promociones, dirígete al perfil del cliente una vez guardados los cambios.
-                      </div>
                     </div>
                   )}
+
+                  {/* Fecha de corte */}
+                  <div className="border-t border-border/40 pt-3 space-y-1.5">
+                    <label className="block text-xs font-semibold text-brand-400 uppercase tracking-wider">
+                      Fecha de corte
+                    </label>
+                    <select {...register('dia_pago')} className="input-field cursor-pointer font-sans text-sm">
+                      <option value="registro">Fecha de registro del cliente</option>
+                      {fechasCorte.map((dia) => (
+                        <option key={dia} value={String(dia)}>Día {dia} de cada mes</option>
+                      ))}
+                    </select>
+                    {watchDiaPago === 'registro' && watchCreatedAt ? (
+                      <p className="text-[10px] text-brand-400">
+                        → Día {new Date(watchCreatedAt + 'T12:00:00').getDate()} del mes (fecha de registro)
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-muted-foreground">
+                        Día del mes en que se genera el corte y envío de cobros.
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 {/* Servicios de Valor Agregado */}
-                <div className="glass-card p-5 border border-border/60 bg-secondary/10 md:col-span-2 space-y-4">
+                <div className="glass-card p-5 border border-border/60 bg-secondary/10 md:col-span-2 space-y-4 overflow-y-auto max-h-[480px]">
                   <div>
                     <label className="block text-sm font-semibold text-brand-400 uppercase tracking-wider mb-1">
                       Servicios Adicionales (Valores Agregados)
@@ -1308,28 +1432,6 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {/* Panel Preferencias */}
                 <div className="glass-card p-5 border border-border/60 space-y-4 bg-secondary/10">
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-1.5">Día de Pago Preferido</label>
-                    <select {...register('dia_pago')} className="input-field cursor-pointer font-sans">
-                      <option value="1">Día 1 de cada mes</option>
-                      <option value="5">Día 5 de cada mes (Recomendado)</option>
-                      <option value="10">Día 10 de cada mes</option>
-                      <option value="15">Día 15 de cada mes</option>
-                      <option value="28">Día 28 de cada mes</option>
-                    </select>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      Determina la fecha límite del corte de servicio y envío de cobros.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-1.5">Método de Pago Habitual</label>
-                    <select {...register('metodo_pago')} className="input-field cursor-pointer font-sans">
-                      {methods.map((m) => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                      ))}
-                    </select>
-                  </div>
 
                   {/* Fecha de Inicio Facturación */}
                   <div className="grid grid-cols-2 gap-3">
@@ -1347,8 +1449,8 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                     <div>
                       <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Tipo de Facturación</label>
                       <select {...register('tipo_facturacion')} className="input-field font-sans text-xs cursor-pointer">
-                        <option value="forward">Adelantado (Forward)</option>
-                        <option value="backward">Vencido (Backward)</option>
+                        <option value="forward">Prepago</option>
+                        <option value="backward">Postpago</option>
                       </select>
                     </div>
                     <div>
@@ -1356,7 +1458,14 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                       <input type="number" min="0" {...register('crear_factura_anticipo_dias')} className="input-field font-mono text-xs font-bold" />
                     </div>
                   </div>
-
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">Método de Pago Habitual</label>
+                    <select {...register('metodo_pago')} className="input-field cursor-pointer font-sans">
+                      {methods.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
                   <div className="border-t border-border/40 pt-3 space-y-3">
                     {/* Auto aplicar pago */}
                     <div className="flex items-center justify-between">
@@ -1404,6 +1513,20 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                       <div className="space-y-3">
                         <div className="text-[11px] font-bold text-brand-400 uppercase tracking-wider">
                           Simulación de Facturación Proyectada
+                        </div>
+
+                        {/* Fecha de corte resumen */}
+                        <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-secondary/30 border border-border/40">
+                          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Fecha de corte</span>
+                          <span className="text-xs font-medium text-foreground">
+                            {watchDiaPago === 'registro'
+                              ? watchCreatedAt
+                                ? `Día ${new Date(watchCreatedAt + 'T12:00:00').getDate()} (fecha de registro)`
+                                : 'Fecha de registro'
+                              : watchDiaPago
+                                ? `Día ${watchDiaPago} de cada mes`
+                                : '—'}
+                          </span>
                         </div>
 
                         {/* Primera factura después del cambio */}
@@ -1475,12 +1598,12 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
               </div>
 
               <div className="glass-card p-6 border border-border/60 space-y-4 bg-secondary/10">
-                {/* Router asignado y Tipo de Conexión */}
+                {/* Gateway y Tipo de Conexión */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 font-sans">
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-1.5">Router asignado *</label>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">Gateway *</label>
                     <select {...register('gateway_id')} className="input-field cursor-pointer font-sans">
-                      <option value="">Seleccione router</option>
+                      <option value="">Seleccione gateway</option>
                       {routers.map((r) => (
                         <option key={r.id} value={r.id}>{r.nombre} ({r.ip})</option>
                       ))}
@@ -1500,33 +1623,21 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                 {/* Campos condicionales para IP Estática */}
                 {watch('tipo') === 'static' && (
                   <div className="space-y-4 border-l-2 border-brand-500 pl-4 py-1.5 mt-2 bg-brand-500/5 rounded-r-lg pr-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-foreground mb-1.5">Dirección IP *</label>
-                        <input
-                          type="text"
-                          placeholder="192.168.10.50"
-                          {...register('ip')}
-                          className="input-field font-mono"
-                        />
-                        {errors.ip && <p className="text-xs text-destructive mt-1">{errors.ip.message}</p>}
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-foreground mb-1.5">Dirección MAC</label>
-                        <input
-                          type="text"
-                          placeholder="AA:BB:CC:DD:EE:FF"
-                          {...register('mac')}
-                          className="input-field font-mono"
-                        />
-                        {errors.mac && <p className="text-xs text-destructive mt-1">{errors.mac.message}</p>}
-                      </div>
+                    <div>
+                      <label className="block text-sm font-medium text-foreground mb-1.5">Dirección IP *</label>
+                      <input
+                        type="text"
+                        placeholder="192.168.10.50"
+                        {...register('ip')}
+                        className="input-field font-mono"
+                      />
+                      {errors.ip && <p className="text-xs text-destructive mt-1">{errors.ip.message}</p>}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-foreground mb-1.5">Notas de Red</label>
                       <input
                         type="text"
-                        placeholder="Ej: Antena LiteBeam, Ubiquiti, etc."
+                        placeholder="Ej: Puerto switch #3, VLAN 10, etc."
                         {...register('notas_ip')}
                         className="input-field"
                       />
@@ -1558,6 +1669,156 @@ export function ClientFormDialog({ open, onClose, client, onSuccess }: ClientFor
                         />
                         {errors.contraseña_ppp && <p className="text-xs text-destructive mt-1">{errors.contraseña_ppp.message}</p>}
                       </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Sección de equipos de inventario */}
+              <div className="glass-card p-6 border border-border/60 space-y-4 bg-secondary/10">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-brand-400 text-xs font-semibold uppercase tracking-wider">
+                    <Package className="w-4 h-4" /> Equipos Asignados
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddEquipment(true)
+                      setNewEquipmentItemId('')
+                      setNewEquipmentCantidad(1)
+                      setNewEquipmentSerie('')
+                      setNewEquipmentMac('')
+                      setNewEquipmentNotas('')
+                    }}
+                    className="btn-secondary text-xs px-2.5 py-1.5 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Agregar
+                  </button>
+                </div>
+
+                {selectedInventoryItems.length === 0 && !showAddEquipment && (
+                  <p className="text-xs text-muted-foreground italic font-sans">
+                    No hay equipos asignados a este cliente.
+                  </p>
+                )}
+
+                {selectedInventoryItems.length > 0 && (
+                  <div className="space-y-2">
+                    {selectedInventoryItems.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-start justify-between p-3 rounded-lg bg-secondary/30 border border-border/40"
+                      >
+                        <div className="text-xs space-y-0.5">
+                          <p className="font-semibold text-foreground">
+                            {item.item_nombre}
+                            <span className="text-muted-foreground font-normal font-mono ml-1.5">#{item.item_codigo}</span>
+                          </p>
+                          <p className="text-muted-foreground font-sans">
+                            Cant: <span className="text-foreground font-medium">{item.cantidad}</span>
+                            {item.numero_serie && <> · Serie: <span className="font-mono text-foreground">{item.numero_serie}</span></>}
+                            {item.mac && <> · MAC: <span className="font-mono text-foreground">{item.mac}</span></>}
+                            {item.notas && <> · {item.notas}</>}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedInventoryItems(prev => prev.filter((_, i) => i !== idx))}
+                          className="p-1 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Mini-formulario para agregar equipo */}
+                {showAddEquipment && (
+                  <div className="p-4 rounded-lg border border-brand-500/30 bg-brand-500/5 space-y-3">
+                    <select
+                      value={newEquipmentItemId}
+                      onChange={(e) => setNewEquipmentItemId(e.target.value)}
+                      className="input-field text-xs cursor-pointer font-sans w-full"
+                    >
+                      <option value="">-- Seleccionar artículo del inventario --</option>
+                      {inventoryItems.map(item => (
+                        <option key={item.id} value={item.id}>
+                          {item.nombre} ({item.codigo}){item.modelo ? ` — ${item.modelo}` : ''} · Stock: {item.cantidad}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[10px] text-muted-foreground font-semibold uppercase">Cantidad</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={newEquipmentCantidad}
+                          onChange={(e) => setNewEquipmentCantidad(Number(e.target.value))}
+                          className="input-field text-xs mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground font-semibold uppercase">N° Serie</label>
+                        <input
+                          type="text"
+                          value={newEquipmentSerie}
+                          onChange={(e) => setNewEquipmentSerie(e.target.value)}
+                          placeholder="SN123456"
+                          className="input-field text-xs font-mono mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground font-semibold uppercase">MAC</label>
+                        <input
+                          type="text"
+                          value={newEquipmentMac}
+                          onChange={(e) => setNewEquipmentMac(e.target.value)}
+                          placeholder="AA:BB:CC:DD:EE:FF"
+                          className="input-field text-xs font-mono mt-1"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground font-semibold uppercase">Notas</label>
+                      <input
+                        type="text"
+                        value={newEquipmentNotas}
+                        onChange={(e) => setNewEquipmentNotas(e.target.value)}
+                        placeholder="Ubicación, estado, etc."
+                        className="input-field text-xs mt-1"
+                      />
+                    </div>
+                    <div className="flex gap-2 justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddEquipment(false)}
+                        className="btn-secondary text-xs px-3 py-1.5 cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!newEquipmentItemId}
+                        onClick={() => {
+                          const found = inventoryItems.find(i => i.id === newEquipmentItemId)
+                          if (!found) return
+                          setSelectedInventoryItems(prev => [...prev, {
+                            inventory_item_id: found.id,
+                            item_nombre: found.nombre,
+                            item_codigo: found.codigo,
+                            cantidad: newEquipmentCantidad,
+                            numero_serie: newEquipmentSerie,
+                            mac: newEquipmentMac,
+                            notas: newEquipmentNotas,
+                          }])
+                          setShowAddEquipment(false)
+                        }}
+                        className="btn-primary text-xs px-3 py-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        Agregar
+                      </button>
                     </div>
                   </div>
                 )}

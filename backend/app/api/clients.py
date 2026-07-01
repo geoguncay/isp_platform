@@ -21,6 +21,8 @@ from app.models.pppoe_secret import PPPoESecret
 from app.models.pppoe_profile import PPPoEProfile
 from app.models.invoice import Invoice
 from app.models.custom_service import CustomService
+from app.models.inventory import InventoryItem
+from app.models.client_inventory import ClientInventoryItem
 from app.services.mikrotik.pppoe import (
     sync_pppoe_secret_in_router,
     remove_pppoe_secret_from_router,
@@ -111,6 +113,25 @@ def _enrich_client(client: Client, db: Session) -> dict:
     else:
         data["pppoe_secret"] = None
 
+    # Equipos de inventario asignados
+    inventory_items = []
+    for assignment in client.inventory_items:
+        item = assignment.inventory_item
+        inventory_items.append({
+            "id": assignment.id,
+            "inventory_item_id": assignment.inventory_item_id,
+            "cantidad": assignment.cantidad,
+            "numero_serie": assignment.numero_serie,
+            "mac": assignment.mac,
+            "notas": assignment.notas,
+            "assigned_at": assignment.assigned_at,
+            "item_nombre": item.nombre if item else None,
+            "item_codigo": item.codigo if item else None,
+            "item_modelo": item.modelo if item else None,
+            "item_categoria": item.categoria if item else None,
+        })
+    data["inventory_items"] = inventory_items
+
     return data
 
 
@@ -139,7 +160,7 @@ def list_clients(
         query = query.filter(Client.gateway_id == gateway_id)
 
     if site_id:
-        query = query.join(Router, Client.gateway_id == Router.id).filter(Router.site_id == site_id)
+        query = query.join(Gateway, Client.gateway_id == Gateway.id).filter(Gateway.site_id == site_id)
 
     if activo is not None:
         query = query.filter(Client.activo == activo)
@@ -163,7 +184,11 @@ def list_clients(
 
     # Ordenamiento dinámico
     sort_column = Client.created_at
-    if sort_by == "nombre":
+    if sort_by == "apellidos":
+        sort_column = Client.apellidos
+    elif sort_by == "nombres":
+        sort_column = Client.nombres
+    elif sort_by == "nombre":
         sort_column = Client.nombre
     elif sort_by == "cedula":
         sort_column = Client.cedula
@@ -189,7 +214,7 @@ def list_clients(
         sort_column = static_ip_alias.ip
     elif sort_by == "router":
         from sqlalchemy.orm import aliased
-        router_alias = aliased(Router)
+        router_alias = aliased(Gateway)
         query = query.outerjoin(router_alias, Client.gateway_id == router_alias.id)
         sort_column = router_alias.nombre
     elif sort_by == "plan":
@@ -218,7 +243,7 @@ def list_clients(
 def create_client(payload: ClientCreate, db: DBSession, current_user: AdminOrTecnico) -> dict:
     """Crea un nuevo cliente. Opcionalmente asigna un plan inicial y sincroniza IP estática en MikroTik."""
     # Verificar que el router exista y esté activo
-    r = db.get(Router, payload.gateway_id)
+    r = db.get(Gateway, payload.gateway_id)
     if not r or not r.activo:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -349,6 +374,26 @@ def create_client(payload: ClientCreate, db: DBSession, current_user: AdminOrTec
     db.add(client)
     db.flush()  # Generar ID del cliente antes de asociar el plan e IP / secreto
 
+    # Registrar equipos asignados del inventario
+    if payload.inventory_items:
+        for item_data in payload.inventory_items:
+            inv_item = db.get(InventoryItem, item_data.inventory_item_id)
+            if not inv_item:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"El artículo de inventario con ID {item_data.inventory_item_id} no existe.",
+                )
+            assignment = ClientInventoryItem(
+                client_id=client.id,
+                inventory_item_id=item_data.inventory_item_id,
+                cantidad=item_data.cantidad,
+                numero_serie=item_data.numero_serie,
+                mac=item_data.mac,
+                notas=item_data.notas,
+            )
+            db.add(assignment)
+
     # Crear el registro del plan inicial si se especificó
     if payload.plan_id:
         client_plan = ClientPlan(
@@ -475,7 +520,7 @@ def update_client(
 
     # Validar router si cambia
     if "gateway_id" in update_data and update_data["gateway_id"] != client.gateway_id:
-        r = db.get(Router, update_data["gateway_id"])
+        r = db.get(Gateway, update_data["gateway_id"])
         if not r or not r.activo:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -530,7 +575,7 @@ def update_client(
                     detail=f"La dirección IP {ip_val} ya está asignada a otro cliente en este router.",
                 )
 
-        new_router = db.get(Router, new_gateway_id)
+        new_router = db.get(Gateway, new_gateway_id)
 
         # Remover IP anterior si cambió de IP o de router
         if old_ip and (old_ip != ip_val or old_gateway_id != new_gateway_id):
@@ -660,7 +705,7 @@ def update_client(
             db.flush()
 
         perf_id = profile.id
-        new_router = db.get(Router, new_gateway_id)
+        new_router = db.get(Gateway, new_gateway_id)
 
         # Asegurar perfil en MikroTik
         try:
@@ -673,7 +718,7 @@ def update_client(
                 detail=f"No se pudo configurar el perfil PPPoE en el router MikroTik. Error: {str(e)}"
             )
 
-        new_router = db.get(Router, new_gateway_id)
+        new_router = db.get(Gateway, new_gateway_id)
 
         # Remover secreto anterior si cambió de usuario o de router
         old_user = client.pppoe_secret.usuario_ppp if client.pppoe_secret else None
@@ -733,7 +778,7 @@ def update_client(
 
     # Actualizar campos básicos
     for field, value in update_data.items():
-        if field not in ("ip", "mac", "notas_ip", "usuario_ppp", "contraseña_ppp", "perfil_id", "custom_service_ids"):
+        if field not in ("ip", "mac", "notas_ip", "usuario_ppp", "contraseña_ppp", "perfil_id", "custom_service_ids", "inventory_items"):
             setattr(client, field, value)
 
     if "apellidos" in update_data or "nombres" in update_data:
@@ -744,6 +789,29 @@ def update_client(
             client.custom_services = db.query(CustomService).filter(CustomService.id.in_(update_data["custom_service_ids"])).all()
         else:
             client.custom_services = []
+
+    if "inventory_items" in update_data:
+        # Reemplazar toda la lista de equipos asignados
+        for existing in client.inventory_items:
+            db.delete(existing)
+        db.flush()
+        for item_data in (update_data["inventory_items"] or []):
+            inv_item = db.get(InventoryItem, item_data["inventory_item_id"])
+            if not inv_item:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"El artículo de inventario con ID {item_data['inventory_item_id']} no existe.",
+                )
+            assignment = ClientInventoryItem(
+                client_id=client.id,
+                inventory_item_id=item_data["inventory_item_id"],
+                cantidad=item_data.get("cantidad", 1),
+                numero_serie=item_data.get("numero_serie"),
+                mac=item_data.get("mac"),
+                notas=item_data.get("notas"),
+            )
+            db.add(assignment)
 
     db.commit()
     db.refresh(client)
@@ -1184,6 +1252,67 @@ def reactivate_client(
     return log
 
 
+@router.post("/{client_id}/defer-suspension")
+def defer_client_suspension(
+    client_id: uuid.UUID,
+    aplazar_hasta: datetime,
+    motivo: str,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> dict:
+    """
+    Programa una suspensión futura para el cliente:
+    - El cliente permanece activo.
+    - Se guarda la fecha programada en suspension_programada.
+    - El scheduler ejecutará la suspensión cuando llegue esa fecha.
+    """
+    client = db.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+    if not client.activo:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El cliente ya está suspendido.")
+    if aplazar_hasta <= datetime.now():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La fecha de aplazamiento debe ser futura.")
+
+    client.suspension_programada = aplazar_hasta
+    db.commit()
+
+    log_event(
+        db, AuditAction.SUSPEND_CLIENT,
+        entidad_tipo="Client", entidad_id=str(client.id), entidad_nombre=client.nombre,
+        usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+        detalle={"motivo": motivo, "aplazado_hasta": aplazar_hasta.isoformat(), "tipo": "aplazamiento"},
+    )
+
+    return {"detail": "Suspensión programada correctamente.", "aplazar_hasta": aplazar_hasta.isoformat()}
+
+
+@router.delete("/{client_id}/defer-suspension")
+def cancel_deferred_suspension(
+    client_id: uuid.UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> dict:
+    """Cancela una suspensión programada, dejando al cliente activo sin fecha de corte."""
+    client = db.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+    if not client.suspension_programada:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El cliente no tiene ninguna suspensión programada.")
+
+    client.suspension_programada = None
+    db.commit()
+
+    log_event(
+        db, AuditAction.ACTIVATE_CLIENT,
+        entidad_tipo="Client", entidad_id=str(client.id), entidad_nombre=client.nombre,
+        usuario_id=current_user.id, usuario_nombre=current_user.nombre,
+        detalle={"tipo": "cancelar_aplazamiento"},
+    )
+
+    return {"detail": "Suspensión programada cancelada correctamente."}
+
+
 @router.get("/{client_id}/suspensions", response_model=list[SuspensionLogResponse])
 def get_client_suspension_history(
     client_id: uuid.UUID,
@@ -1415,9 +1544,9 @@ def validate_import_data(
         if router_raw:
             try:
                 router_uuid = uuid.UUID(router_raw)
-                router = db.get(Router, router_uuid)
+                router = db.get(Gateway, router_uuid)
             except ValueError:
-                router = db.query(Router).filter(Router.nombre.ilike(router_raw)).first()
+                router = db.query(Gateway).filter(Gateway.nombre.ilike(router_raw)).first()
             
             if not router:
                 errors.append(f"El router '{router_raw}' no existe en el sistema.")
@@ -1519,6 +1648,8 @@ def commit_import_clients(
     se registra el error y se continúa con el siguiente para no bloquear toda la importación.
     """
     import uuid
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
     from app.schemas.client_import import BulkImportPayload
     from app.models.gateway import Gateway
     from app.models.plan import Plan
@@ -1529,8 +1660,9 @@ def commit_import_clients(
     from app.models.custom_service import CustomService
     from app.services.mikrotik.address_list import sync_ip_in_address_list
     from app.services.mikrotik.queue import sync_client_queue
-    from app.services.mikrotik.pppoe import sync_pppoe_secret_in_router
+    from app.services.mikrotik.pppoe import sync_pppoe_secret_in_router, sync_pppoe_profile_in_router
     from app.core.security import encrypt_secret
+    from app.services.mikrotik.sync_queue import enqueue_sync
 
     successes = []
     failures = []
@@ -1538,7 +1670,7 @@ def commit_import_clients(
     for idx, client_data in enumerate(payload.clients):
         try:
             with db.begin_nested():
-                r = db.get(Router, client_data.gateway_id)
+                r = db.get(Gateway, client_data.gateway_id)
                 if not r or not r.activo:
                     raise Exception("El router especificado no existe o está inactivo.")
                 
@@ -1591,9 +1723,6 @@ def commit_import_clients(
                         db.add(profile)
                         db.flush()
                     
-                    from app.services.mikrotik.pppoe import sync_pppoe_profile_in_router
-                    sync_pppoe_profile_in_router(r, plan)
-                
                 client = Client(
                     nombre=f"{client_data.apellidos} {client_data.nombres}".strip(),
                     apellidos=client_data.apellidos,
@@ -1640,11 +1769,40 @@ def commit_import_clients(
                         notas=client_data.notas_ip,
                     )
                     db.add(static_ip)
-                    
+                    # Precalcular addr_list_name aquí (solo acceso a BD, no MikroTik)
                     p = db.get(Plan, client_data.plan_id) if client_data.plan_id else None
                     addr_list_name = get_clean_list_name(r.address_list or (p.address_list if p else None))
+
+                elif client_data.tipo == "pppoe" and client_data.usuario_ppp and client_data.contraseña_ppp:
+                    pppoe_sec = PPPoESecret(
+                        cliente_id=client.id,
+                        usuario_ppp=client_data.usuario_ppp,
+                        contraseña_ppp=encrypt_secret(client_data.contraseña_ppp),
+                        perfil_id=profile.id,
+                        gateway_id=client_data.gateway_id,
+                    )
+                    db.add(pppoe_sec)
+                    db.flush()  # genera pppoe_sec.id antes del commit
+
+            # ── Cliente en BD confirmado ──────────────────────────────────────
+            db.commit()
+
+            # ── Sync MikroTik (fuera del savepoint; falla → encolar, nunca revertir el cliente) ──
+            _sync_pending = False
+
+            if client_data.tipo == "static" and client_data.ip:
+                try:
                     sync_ip_in_address_list(r, client_data.ip, client.nombre, list_name=addr_list_name)
-                    if p:
+                except Exception as _e:
+                    enqueue_sync(db, client.gateway_id, client.id, "add_to_address_list", {
+                        "ip": client_data.ip,
+                        "client_name": client.nombre,
+                        "list_name": addr_list_name or "isp_clientes",
+                    })
+                    _sync_pending = True
+                    _logger.warning(f"[Import] address_list → encolado ({client_data.cedula}): {_e}")
+                if p:
+                    try:
                         sync_client_queue(
                             router=r,
                             client_name=client.nombre,
@@ -1659,29 +1817,58 @@ def commit_import_clients(
                             prioridad=p.prioridad,
                             parent=get_clean_parent_name(r.cola_padre or p.parent),
                         )
-                
-                elif client_data.tipo == "pppoe" and client_data.usuario_ppp and client_data.contraseña_ppp:
-                    pppoe_sec = PPPoESecret(
-                        cliente_id=client.id,
-                        usuario_ppp=client_data.usuario_ppp,
-                        contraseña_ppp=encrypt_secret(client_data.contraseña_ppp),
-                        perfil_id=profile.id,
-                        gateway_id=client_data.gateway_id,
-                    )
-                    db.add(pppoe_sec)
+                    except Exception as _e:
+                        enqueue_sync(db, client.gateway_id, client.id, "add_queue", {
+                            "client_name": client.nombre,
+                            "ip": client_data.ip,
+                            "speed_up": p.velocidad_up_kbps,
+                            "speed_down": p.velocidad_down_kbps,
+                            "plan_name": p.nombre,
+                            "limit_at_up": p.limit_at_up_kbps,
+                            "limit_at_down": p.limit_at_down_kbps,
+                            "burst_threshold_up": p.burst_threshold_up_kbps,
+                            "burst_threshold_down": p.burst_threshold_down_kbps,
+                            "prioridad": p.prioridad,
+                            "parent": get_clean_parent_name(r.cola_padre or p.parent),
+                        })
+                        _sync_pending = True
+                        _logger.warning(f"[Import] queue → encolado ({client_data.cedula}): {_e}")
+
+            elif client_data.tipo == "pppoe" and client_data.usuario_ppp:
+                try:
+                    sync_pppoe_profile_in_router(r, plan)
+                except Exception as _e:
+                    enqueue_sync(db, client.gateway_id, client.id, "add_pppoe_profile", {
+                        "plan_id": str(plan.id),
+                    })
+                    _sync_pending = True
+                    _logger.warning(f"[Import] pppoe_profile → encolado ({plan.nombre}): {_e}")
+                try:
                     sync_pppoe_secret_in_router(
                         router=r,
                         username=client_data.usuario_ppp,
                         password=client_data.contraseña_ppp,
                         profile_name=profile.nombre,
                         client_name=client.nombre,
-                        disabled=False
+                        disabled=False,
                     )
-            
-            db.commit()
+                except Exception as _e:
+                    enqueue_sync(db, client.gateway_id, client.id, "add_pppoe_secret", {
+                        "pppoe_secret_id": str(pppoe_sec.id),
+                        "profile_name": profile.nombre,
+                        "client_name": client.nombre,
+                        "disabled": False,
+                    })
+                    _sync_pending = True
+                    _logger.warning(f"[Import] pppoe_secret → encolado ({client_data.cedula}): {_e}")
+
+            if _sync_pending:
+                db.commit()
+
             successes.append({
                 "nombre": client_data.nombre,
-                "cedula": client_data.cedula
+                "cedula": client_data.cedula,
+                "sync_pending": _sync_pending,
             })
         except Exception as e:
             db.rollback()
@@ -1691,13 +1878,15 @@ def commit_import_clients(
                 "error": str(e)
             })
             
+    sync_pending_count = sum(1 for s in successes if s.get("sync_pending"))
     return {
         "success": len(failures) == 0,
         "total": len(payload.clients),
         "imported_count": len(successes),
         "failed_count": len(failures),
+        "sync_pending_count": sync_pending_count,
         "successes": successes,
-        "failures": failures
+        "failures": failures,
     }
 
 

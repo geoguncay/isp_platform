@@ -42,6 +42,7 @@ class InventoryItem(Base):
 
     # Relaciones
     proveedor = relationship("Supplier", back_populates="inventory_items")
+    client_assignments = relationship("ClientInventoryItem", back_populates="inventory_item")
 
     def __repr__(self) -> str:
         return f"<InventoryItem id={self.id} nombre={self.nombre} codigo={self.codigo} cantidad={self.cantidad}>"
