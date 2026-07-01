@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     # ── App ──────────────────────────────────────────────────
-    APP_NAME: str = "ISP Platform"
+    APP_NAME: str = "ISP Network Managgement System"
     ENVIRONMENT: Literal["development", "production"] = "development"
     DEBUG: bool = False
 
@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str | None = None
     TWILIO_AUTH_TOKEN: str | None = None
     TWILIO_FROM_PHONE: str | None = None
+
+    # ── Backups manuales (Ajustes de Sistema) ─────────────────
+    BACKUP_DIR: str = "./backups"
 
     # ── CORS ──────────────────────────────────────────────────
     ALLOWED_ORIGINS: str | list[str] = [

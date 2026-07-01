@@ -17,6 +17,8 @@ import { Navigate } from 'react-router-dom'
 import api from '@/services/api'
 import { getLogoUrl } from '@/components/AppLayout'
 import { SiteFormModal, type SiteItem } from '@/components/SiteFormModal'
+import { getSystemSettings, updateBilling, updateSuspension, updateCatalogs } from '@/services/systemSettings'
+import { GeneralSettingsTab } from '@/pages/settings/GeneralSettingsTab'
 
 // ── Zod Schemas ──────────────────────────────────────────────────────────────
 const companySchema = z.object({
@@ -254,6 +256,46 @@ export function SettingsPage() {
     })
   }
 
+  // ── Ajustes de Sistema: carga agregada desde DB (localización, fiscal, notificaciones, seguridad, mantenimiento, integraciones, facturación, suspensión, catálogos) ──
+  const systemSettingsQuery = useQuery({
+    queryKey: ['system-settings'],
+    queryFn: getSystemSettings,
+    enabled: isAdmin,
+  })
+  const billingData = systemSettingsQuery.data?.billing
+  const suspensionData = systemSettingsQuery.data?.suspension
+
+  const billingMutation = useMutation({
+    mutationFn: updateBilling,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-settings'] })
+      setBillingDirty(false)
+      setStatusMessage({ type: 'success', text: 'Las políticas de facturación global se actualizaron correctamente.' })
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setStatusMessage({ type: 'error', text: msg || 'Error al guardar la facturación.' })
+    },
+  })
+
+  const suspensionMutation = useMutation({
+    mutationFn: updateSuspension,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['system-settings'] }),
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setStatusMessage({ type: 'error', text: msg || 'Error al guardar la suspensión.' })
+    },
+  })
+
+  const catalogsMutation = useMutation({
+    mutationFn: updateCatalogs,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['system-settings'] }),
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setStatusMessage({ type: 'error', text: msg || 'Error al guardar el catálogo.' })
+    },
+  })
+
   const LOG_LIMIT = 50
   const { data: logsData, isLoading: logsLoading, isFetching: logsFetching, refetch: refetchLogs } = useQuery<AuditLogListResponse>({
     queryKey: ['audit-logs', logPage, logFilterAccion, logFilterEntidad],
@@ -274,73 +316,66 @@ export function SettingsPage() {
     return <Navigate to="/dashboard" replace />
   }
 
-  // Cargar Motivos de Suspensión al activar pestaña
+  // Cargar Motivos de Suspensión al activar pestaña (desde DB)
   useEffect(() => {
-    if (activeTab === 'billing' && generalSubTab === 'suspension') {
-      const saved = localStorage.getItem('wisp_suspension_motivos_list')
+    if (activeTab === 'billing' && generalSubTab === 'suspension' && systemSettingsQuery.data) {
+      const loaded = systemSettingsQuery.data.suspension.suspension_motivos
       const defaults = ['Falta de pago', 'Solicitud del cliente', 'Mantenimiento', 'Incumplimiento de contrato']
-      if (saved) {
-        try { setSuspensionMotivos(JSON.parse(saved)) } catch { setSuspensionMotivos(defaults) }
+      if (loaded && loaded.length > 0) {
+        setSuspensionMotivos(loaded)
       } else {
         setSuspensionMotivos(defaults)
-        localStorage.setItem('wisp_suspension_motivos_list', JSON.stringify(defaults))
+        suspensionMutation.mutate({ suspension_motivos: defaults })
       }
     }
-  }, [activeTab, generalSubTab])
+  }, [activeTab, generalSubTab, systemSettingsQuery.data])
 
-  // Cargar Fechas de Corte al activar pestaña
+  // Cargar Fechas de Corte al activar pestaña (desde DB)
   useEffect(() => {
-    if (activeTab === 'billing' && generalSubTab === 'payment_methods') {
-      const saved = localStorage.getItem('wisp_fechas_corte')
+    if (activeTab === 'billing' && generalSubTab === 'payment_methods' && systemSettingsQuery.data) {
+      const loaded = systemSettingsQuery.data.catalogs.fechas_corte
       const defaults = [1, 5, 10, 15, 28]
-      if (saved) {
-        try { setFechasCorte(JSON.parse(saved)) } catch { setFechasCorte(defaults) }
+      if (loaded && loaded.length > 0) {
+        setFechasCorte(loaded)
       } else {
         setFechasCorte(defaults)
-        localStorage.setItem('wisp_fechas_corte', JSON.stringify(defaults))
+        catalogsMutation.mutate({ fechas_corte: defaults })
       }
     }
-  }, [activeTab, generalSubTab])
+  }, [activeTab, generalSubTab, systemSettingsQuery.data])
 
-  // Cargar Métodos de Pago al activar pestaña
+  // Cargar Métodos de Pago al activar pestaña (desde DB)
   useEffect(() => {
-    if (activeTab === 'billing' && generalSubTab === 'payment_methods') {
-      const saved = localStorage.getItem('wisp_payment_methods')
+    if (activeTab === 'billing' && generalSubTab === 'payment_methods' && systemSettingsQuery.data) {
+      const loaded = systemSettingsQuery.data.catalogs.payment_methods
       const defaults: PaymentMethod[] = [
         { value: 'efectivo', label: 'Efectivo', isSystem: true },
         { value: 'transferencia', label: 'Transferencia', isSystem: true },
         { value: 'tarjeta', label: 'Tarjeta', isSystem: true },
         { value: 'deposito', label: 'Depósito', isSystem: true }
       ]
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved) as PaymentMethod[]
-          const loaded = parsed.map(p => {
-            if (['efectivo', 'transferencia', 'tarjeta', 'deposito'].includes(p.value)) {
-              return { ...p, isSystem: true }
-            }
-            return p
-          })
-          setPaymentMethods(loaded)
-        } catch (e) {
-          setPaymentMethods(defaults)
-        }
+      if (loaded && loaded.length > 0) {
+        const withSystemFlag = loaded.map(p => {
+          if (['efectivo', 'transferencia', 'tarjeta', 'deposito'].includes(p.value)) {
+            return { ...p, isSystem: true }
+          }
+          return p
+        })
+        setPaymentMethods(withSystemFlag)
       } else {
         setPaymentMethods(defaults)
-        localStorage.setItem('wisp_payment_methods', JSON.stringify(defaults))
+        catalogsMutation.mutate({ payment_methods: defaults })
       }
     }
-  }, [activeTab, generalSubTab])
+  }, [activeTab, generalSubTab, systemSettingsQuery.data])
 
-  // Cargar listas locales del tab gateway al activar pestaña
+  // Cargar listas locales del tab gateway al activar pestaña (desde DB)
   useEffect(() => {
-    if (activeTab === 'gateway') {
-      const savedColas = localStorage.getItem('wisp_colas_padre')
-      setColasPadre(savedColas ? JSON.parse(savedColas) : [])
-      const savedAL = localStorage.getItem('wisp_address_lists')
-      setAddressLists(savedAL ? JSON.parse(savedAL) : [])
+    if (activeTab === 'gateway' && systemSettingsQuery.data) {
+      setColasPadre(systemSettingsQuery.data.catalogs.colas_padre || [])
+      setAddressLists(systemSettingsQuery.data.catalogs.address_lists || [])
     }
-  }, [activeTab])
+  }, [activeTab, systemSettingsQuery.data])
 
 
   // ── Handlers Motivos de Suspensión ─────────────────────────────────────────
@@ -354,7 +389,7 @@ export function SettingsPage() {
     }
     const updated = [...suspensionMotivos, val]
     setSuspensionMotivos(updated)
-    localStorage.setItem('wisp_suspension_motivos_list', JSON.stringify(updated))
+    suspensionMutation.mutate({ suspension_motivos: updated })
     setNewMotivo('')
     setStatusMessage({ type: 'success', text: `Motivo "${val}" agregado.` })
   }
@@ -362,7 +397,7 @@ export function SettingsPage() {
   const handleDeleteMotivo = (val: string) => {
     const updated = suspensionMotivos.filter((m) => m !== val)
     setSuspensionMotivos(updated)
-    localStorage.setItem('wisp_suspension_motivos_list', JSON.stringify(updated))
+    suspensionMutation.mutate({ suspension_motivos: updated })
     setStatusMessage({ type: 'success', text: 'Motivo eliminado.' })
   }
 
@@ -376,14 +411,14 @@ export function SettingsPage() {
     }
     const updated = [...colasPadre, val]
     setColasPadre(updated)
-    localStorage.setItem('wisp_colas_padre', JSON.stringify(updated))
+    catalogsMutation.mutate({ colas_padre: updated })
     setNewColaPadre('')
     setStatusMessage({ type: 'success', text: `Cola padre "${val}" agregada.` })
   }
   const handleDeleteColaPadre = (val: string) => {
     const updated = colasPadre.filter(c => c !== val)
     setColasPadre(updated)
-    localStorage.setItem('wisp_colas_padre', JSON.stringify(updated))
+    catalogsMutation.mutate({ colas_padre: updated })
     setStatusMessage({ type: 'success', text: 'Cola padre eliminada.' })
   }
   const handleSaveColaPadre = (old: string) => {
@@ -391,7 +426,7 @@ export function SettingsPage() {
     if (!val) return
     const updated = colasPadre.map(c => c === old ? val : c)
     setColasPadre(updated)
-    localStorage.setItem('wisp_colas_padre', JSON.stringify(updated))
+    catalogsMutation.mutate({ colas_padre: updated })
     setEditingColaPadre(null)
     setStatusMessage({ type: 'success', text: 'Cola padre actualizada.' })
   }
@@ -406,14 +441,14 @@ export function SettingsPage() {
     }
     const updated = [...addressLists, val]
     setAddressLists(updated)
-    localStorage.setItem('wisp_address_lists', JSON.stringify(updated))
+    catalogsMutation.mutate({ address_lists: updated })
     setNewAddressList('')
     setStatusMessage({ type: 'success', text: `Address List "${val}" agregada.` })
   }
   const handleDeleteAddressList = (val: string) => {
     const updated = addressLists.filter(a => a !== val)
     setAddressLists(updated)
-    localStorage.setItem('wisp_address_lists', JSON.stringify(updated))
+    catalogsMutation.mutate({ address_lists: updated })
     setStatusMessage({ type: 'success', text: 'Address List eliminada.' })
   }
   const handleSaveAddressList = (old: string) => {
@@ -421,7 +456,7 @@ export function SettingsPage() {
     if (!val) return
     const updated = addressLists.map(a => a === old ? val : a)
     setAddressLists(updated)
-    localStorage.setItem('wisp_address_lists', JSON.stringify(updated))
+    catalogsMutation.mutate({ address_lists: updated })
     setEditingAddressList(null)
     setStatusMessage({ type: 'success', text: 'Address List actualizada.' })
   }
@@ -582,7 +617,7 @@ export function SettingsPage() {
     }
     const updated = [...fechasCorte, val].sort((a, b) => a - b)
     setFechasCorte(updated)
-    localStorage.setItem('wisp_fechas_corte', JSON.stringify(updated))
+    catalogsMutation.mutate({ fechas_corte: updated })
     setNewFechaCorteInput('')
     setStatusMessage({ type: 'success', text: `Día ${val} agregado como fecha de corte.` })
   }
@@ -590,7 +625,7 @@ export function SettingsPage() {
   const handleDeleteFechaCorte = (day: number) => {
     const updated = fechasCorte.filter((d) => d !== day)
     setFechasCorte(updated)
-    localStorage.setItem('wisp_fechas_corte', JSON.stringify(updated))
+    catalogsMutation.mutate({ fechas_corte: updated })
     setStatusMessage({ type: 'success', text: `Día ${day} eliminado.` })
   }
 
@@ -606,7 +641,7 @@ export function SettingsPage() {
     }
     const updated = fechasCorte.map((d) => (d === oldDay ? val : d)).sort((a, b) => a - b)
     setFechasCorte(updated)
-    localStorage.setItem('wisp_fechas_corte', JSON.stringify(updated))
+    catalogsMutation.mutate({ fechas_corte: updated })
     setEditingFechaCorteDay(null)
     setStatusMessage({ type: 'success', text: `Fecha de corte actualizada a día ${val}.` })
   }
@@ -637,7 +672,7 @@ export function SettingsPage() {
 
     const updated = [...paymentMethods, { value: cleanValue, label: cleanLabel }]
     setPaymentMethods(updated)
-    localStorage.setItem('wisp_payment_methods', JSON.stringify(updated))
+    catalogsMutation.mutate({ payment_methods: updated })
     setNewMethodLabel('')
     setStatusMessage({ type: 'success', text: `Método de pago "${cleanLabel}" agregado correctamente.` })
   }
@@ -651,7 +686,7 @@ export function SettingsPage() {
 
     const updated = paymentMethods.filter(p => p.value !== valueToDelete)
     setPaymentMethods(updated)
-    localStorage.setItem('wisp_payment_methods', JSON.stringify(updated))
+    catalogsMutation.mutate({ payment_methods: updated })
     setStatusMessage({ type: 'success', text: 'Método de pago eliminado correctamente.' })
   }
 
@@ -666,7 +701,7 @@ export function SettingsPage() {
     })
 
     setPaymentMethods(updated)
-    localStorage.setItem('wisp_payment_methods', JSON.stringify(updated))
+    catalogsMutation.mutate({ payment_methods: updated })
     setEditingValue(null)
     setStatusMessage({ type: 'success', text: 'Método de pago actualizado correctamente.' })
   }
@@ -856,7 +891,7 @@ export function SettingsPage() {
     { id: 'billing', icon: Receipt, label: 'Facturación' },
     { id: 'users', icon: Users, label: 'Operadores' },
     { id: 'alerts', icon: Bell, label: 'Alertas' },
-    { id: 'logs', icon: ClipboardList, label: 'Log del Sistema' },
+    { id: 'logs', icon: ClipboardList, label: 'Logs' },
   ]
 
   const activeLabel = navItems.find(i => i.id === activeTab)?.label ?? ''
@@ -915,17 +950,9 @@ export function SettingsPage() {
               <p className="text-sm font-medium">{statusMessage.text}</p>
             </div>
           )}
-          {/* ── Tab Content: Ajustes Generales ───────────────────────────────────── */}
+          {/* ── Tab Content: Ajustes Generales / Ajustes de Sistema ─────────────────── */}
           {activeTab === 'general' && (
-            <div className="glass-card p-12 text-center max-w-xl mx-auto space-y-4 animate-fade-in">
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto border border-primary/25">
-                <SlidersHorizontal className="w-8 h-8 text-primary" />
-              </div>
-              <h3 className="text-lg font-semibold text-foreground">Ajustes Generales</h3>
-              <p className="text-muted-foreground text-sm">
-                Próximamente
-              </p>
-            </div>
+            <GeneralSettingsTab isAdmin={isAdmin} setStatusMessage={setStatusMessage} />
           )}
 
           {/* ── Tab Content: Company ──────────────────────────────────────────────── */}
@@ -1695,27 +1722,24 @@ export function SettingsPage() {
                   </div>
 
                   <form
+                    key={billingData ? 'loaded' : 'loading'}
                     onSubmit={(e) => {
                       e.preventDefault()
                       const target = e.currentTarget as any
-                      localStorage.setItem('wisp_billing_hora_generacion', target.horaGeneracion.value)
-                      localStorage.setItem('wisp_billing_ciclo', target.cicloFacturacion.value)
-                      localStorage.setItem('wisp_billing_modo_precio', target.modoPrecio.value)
-                      localStorage.setItem('wisp_billing_auto_aprobar_enviar', target.autoAprobarEnviar.checked ? 'true' : 'false')
-                      localStorage.setItem('wisp_billing_detener_suspendidos', target.detenerSuspendidos.checked ? 'true' : 'false')
-                      localStorage.setItem('wisp_billing_notify_new_invoice', target.notifyNewInvoice.checked ? 'true' : 'false')
-                      localStorage.setItem('wisp_billing_attach_pdf_receipt', target.attachPdfReceipt.checked ? 'true' : 'false')
-                      localStorage.setItem('wisp_billing_default_dia_pago', target.defaultDiaPago.value)
-                      localStorage.setItem('wisp_billing_default_dias_gracia', target.defaultDiasGracia.value)
-                      localStorage.setItem('wisp_billing_aviso_nueva_factura', target.avisoNuevaFactura.checked ? 'true' : 'false')
-                      localStorage.setItem('wisp_billing_aviso_previo_dias', target.avisoPrevioDias.value)
-                      localStorage.setItem('wisp_billing_recordatorios_pago', target.recordatoriosPago.checked ? 'true' : 'false')
-                      localStorage.setItem('wisp_billing_recordatorio_frecuencia_dias', target.recordatorioFrecuenciaDias.value)
-
-                      setBillingDirty(false)
-                      setStatusMessage({
-                        type: 'success',
-                        text: 'Las políticas de facturación global se actualizaron correctamente.',
+                      billingMutation.mutate({
+                        billing_hora_generacion: target.horaGeneracion.value,
+                        billing_ciclo: target.cicloFacturacion.value,
+                        billing_modo_precio: target.modoPrecio.value,
+                        billing_auto_aprobar_enviar: target.autoAprobarEnviar.checked,
+                        billing_detener_suspendidos: target.detenerSuspendidos.checked,
+                        billing_notify_new_invoice: target.notifyNewInvoice.checked,
+                        billing_attach_pdf_receipt: target.attachPdfReceipt.checked,
+                        billing_default_dia_pago: parseInt(target.defaultDiaPago.value, 10),
+                        billing_default_dias_gracia: parseInt(target.defaultDiasGracia.value, 10),
+                        billing_aviso_nueva_factura: target.avisoNuevaFactura.checked,
+                        billing_aviso_previo_dias: parseInt(target.avisoPrevioDias.value, 10),
+                        billing_recordatorios_pago: target.recordatoriosPago.checked,
+                        billing_recordatorio_frecuencia_dias: parseInt(target.recordatorioFrecuenciaDias.value, 10),
                       })
                     }}
                     onChange={() => setBillingDirty(true)}
@@ -1729,7 +1753,7 @@ export function SettingsPage() {
                         <input
                           name="horaGeneracion"
                           type="time"
-                          defaultValue={localStorage.getItem('wisp_billing_hora_generacion') || '08:00'}
+                          defaultValue={billingData?.billing_hora_generacion || '08:00'}
                           className="input-field font-mono"
                         />
                       </div>
@@ -1740,7 +1764,7 @@ export function SettingsPage() {
                         </label>
                         <select
                           name="cicloFacturacion"
-                          defaultValue={localStorage.getItem('wisp_billing_ciclo') || 'mensual'}
+                          defaultValue={billingData?.billing_ciclo || 'mensual'}
                           className="input-field"
                         >
                           <option value="mensual">Mensual</option>
@@ -1757,7 +1781,7 @@ export function SettingsPage() {
                         </label>
                         <select
                           name="modoPrecio"
-                          defaultValue={localStorage.getItem('wisp_billing_modo_precio') || 'incluido'}
+                          defaultValue={billingData?.billing_modo_precio || 'incluido'}
                           className="input-field"
                         >
                           <option value="incluido">Precios incluyendo impuestos</option>
@@ -1776,7 +1800,7 @@ export function SettingsPage() {
                           type="number"
                           min="1"
                           max="28"
-                          defaultValue={localStorage.getItem('wisp_billing_default_dia_pago') || '5'}
+                          defaultValue={String(billingData?.billing_default_dia_pago ?? 5)}
                           className="input-field font-mono"
                           placeholder="5"
                         />
@@ -1793,7 +1817,7 @@ export function SettingsPage() {
                           name="defaultDiasGracia"
                           type="number"
                           min="0"
-                          defaultValue={localStorage.getItem('wisp_billing_default_dias_gracia') || '3'}
+                          defaultValue={String(billingData?.billing_default_dias_gracia ?? 3)}
                           className="input-field font-mono"
                           placeholder="3"
                         />
@@ -1813,7 +1837,7 @@ export function SettingsPage() {
                       <div className="space-y-3">
                         <div className="flex items-center gap-4">
                           <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
-                            <input name="autoAprobarEnviar" type="checkbox" defaultChecked={(localStorage.getItem('wisp_billing_auto_aprobar_enviar') || 'true') === 'true'} className="sr-only peer" />
+                            <input name="autoAprobarEnviar" type="checkbox" defaultChecked={billingData?.billing_auto_aprobar_enviar ?? true} className="sr-only peer" />
                             <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
                           </label>
                           <div>
@@ -1828,7 +1852,7 @@ export function SettingsPage() {
 
                         <div className="flex items-center gap-4">
                           <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
-                            <input name="detenerSuspendidos" type="checkbox" defaultChecked={(localStorage.getItem('wisp_billing_detener_suspendidos') || 'true') === 'true'} className="sr-only peer" />
+                            <input name="detenerSuspendidos" type="checkbox" defaultChecked={billingData?.billing_detener_suspendidos ?? true} className="sr-only peer" />
                             <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
                           </label>
                           <div>
@@ -1853,7 +1877,7 @@ export function SettingsPage() {
                       <div className="space-y-4">
                         <div className="flex items-center gap-4">
                           <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
-                            <input name="notifyNewInvoice" type="checkbox" defaultChecked={(localStorage.getItem('wisp_billing_notify_new_invoice') || 'true') === 'true'} className="sr-only peer" />
+                            <input name="notifyNewInvoice" type="checkbox" defaultChecked={billingData?.billing_notify_new_invoice ?? true} className="sr-only peer" />
                             <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
                           </label>
                           <div>
@@ -1868,7 +1892,7 @@ export function SettingsPage() {
 
                         <div className="flex items-center gap-4">
                           <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
-                            <input name="attachPdfReceipt" type="checkbox" defaultChecked={(localStorage.getItem('wisp_billing_attach_pdf_receipt') || 'true') === 'true'} className="sr-only peer" />
+                            <input name="attachPdfReceipt" type="checkbox" defaultChecked={billingData?.billing_attach_pdf_receipt ?? true} className="sr-only peer" />
                             <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
                           </label>
                           <div>
@@ -1885,7 +1909,7 @@ export function SettingsPage() {
                           <div className="space-y-3">
                             <div className="flex items-center gap-3">
                               <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
-                                <input name="avisoNuevaFactura" type="checkbox" defaultChecked={(localStorage.getItem('wisp_billing_aviso_nueva_factura') || 'true') === 'true'} className="sr-only peer" />
+                                <input name="avisoNuevaFactura" type="checkbox" defaultChecked={billingData?.billing_aviso_nueva_factura ?? true} className="sr-only peer" />
                                 <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
                               </label>
                               <div>
@@ -1899,7 +1923,7 @@ export function SettingsPage() {
                                 name="avisoPrevioDias"
                                 type="number"
                                 min="1"
-                                defaultValue={localStorage.getItem('wisp_billing_aviso_previo_dias') || '5'}
+                                defaultValue={String(billingData?.billing_aviso_previo_dias ?? 5)}
                                 className="input-field py-1 px-2 text-xs font-mono w-24"
                               />
                             </div>
@@ -1908,7 +1932,7 @@ export function SettingsPage() {
                           <div className="space-y-3">
                             <div className="flex items-center gap-3">
                               <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0">
-                                <input name="recordatoriosPago" type="checkbox" defaultChecked={(localStorage.getItem('wisp_billing_recordatorios_pago') || 'true') === 'true'} className="sr-only peer" />
+                                <input name="recordatoriosPago" type="checkbox" defaultChecked={billingData?.billing_recordatorios_pago ?? true} className="sr-only peer" />
                                 <div className="w-11 h-6 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
                               </label>
                               <div>
@@ -1922,7 +1946,7 @@ export function SettingsPage() {
                                 name="recordatorioFrecuenciaDias"
                                 type="number"
                                 min="1"
-                                defaultValue={localStorage.getItem('wisp_billing_recordatorio_frecuencia_dias') || '3'}
+                                defaultValue={String(billingData?.billing_recordatorio_frecuencia_dias ?? 3)}
                                 className="input-field py-1 px-2 text-xs font-mono w-24"
                               />
                             </div>
@@ -2010,15 +2034,18 @@ export function SettingsPage() {
 
                   {/* Grid: Temporización + Notificaciones */}
                   <form
+                    key={suspensionData ? 'loaded' : 'loading'}
                     onSubmit={(e) => {
                       e.preventDefault()
                       const target = e.currentTarget as any
-                      localStorage.setItem('wisp_suspension_automatica', target.suspensionAutomatica.checked ? 'true' : 'false')
-                      localStorage.setItem('wisp_suspension_hora', target.horaSuspension.value)
-                      localStorage.setItem('wisp_suspension_retraso_dias', target.retrasoDias.value)
-                      localStorage.setItem('wisp_suspension_permitir_aplazamiento', target.permitirAplazamiento.checked ? 'true' : 'false')
-                      localStorage.setItem('wisp_suspension_notify_suspendido', target.notifySuspendido.checked ? 'true' : 'false')
-                      localStorage.setItem('wisp_suspension_notify_pospuesto', target.notifyPospuesto.checked ? 'true' : 'false')
+                      suspensionMutation.mutate({
+                        suspension_automatica: target.suspensionAutomatica.checked,
+                        suspension_hora: parseInt(target.horaSuspension.value, 10),
+                        suspension_retraso_dias: parseInt(target.retrasoDias.value, 10),
+                        suspension_permitir_aplazamiento: target.permitirAplazamiento.checked,
+                        suspension_notify_suspendido: target.notifySuspendido.checked,
+                        suspension_notify_pospuesto: target.notifyPospuesto.checked,
+                      })
                       setSuspensionDirty(false)
                       setStatusMessage({ type: 'success', text: 'Políticas de suspensión actualizadas correctamente.' })
                     }}
@@ -2043,7 +2070,7 @@ export function SettingsPage() {
                               type="number"
                               min="0"
                               max="23"
-                              defaultValue={localStorage.getItem('wisp_suspension_hora') || '0'}
+                              defaultValue={String(suspensionData?.suspension_hora ?? 0)}
                               className="input-field font-mono"
                               placeholder="0"
                             />
@@ -2059,7 +2086,7 @@ export function SettingsPage() {
                               name="retrasoDias"
                               type="number"
                               min="0"
-                              defaultValue={localStorage.getItem('wisp_suspension_retraso_dias') || '0'}
+                              defaultValue={String(suspensionData?.suspension_retraso_dias ?? 0)}
                               className="input-field font-mono"
                               placeholder="0"
                             />
@@ -2072,7 +2099,7 @@ export function SettingsPage() {
                         <div className="space-y-3 pt-2 border-t border-border/40">
                           <div className="flex items-start gap-3">
                             <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0 mt-0.5">
-                              <input name="suspensionAutomatica" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_automatica') || 'true') === 'true'} className="sr-only peer" />
+                              <input name="suspensionAutomatica" type="checkbox" defaultChecked={suspensionData?.suspension_automatica ?? true} className="sr-only peer" />
                               <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
                             </label>
                             <div>
@@ -2083,7 +2110,7 @@ export function SettingsPage() {
 
                           <div className="flex items-start gap-3">
                             <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0 mt-0.5">
-                              <input name="permitirAplazamiento" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_permitir_aplazamiento') || 'true') === 'true'} className="sr-only peer" />
+                              <input name="permitirAplazamiento" type="checkbox" defaultChecked={suspensionData?.suspension_permitir_aplazamiento ?? true} className="sr-only peer" />
                               <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
                             </label>
                             <div>
@@ -2106,7 +2133,7 @@ export function SettingsPage() {
                         <div className="space-y-3">
                           <div className="flex items-start gap-3 p-3 rounded-lg bg-secondary/20 border border-border/40">
                             <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0 mt-0.5">
-                              <input name="notifySuspendido" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_notify_suspendido') || 'true') === 'true'} className="sr-only peer" />
+                              <input name="notifySuspendido" type="checkbox" defaultChecked={suspensionData?.suspension_notify_suspendido ?? true} className="sr-only peer" />
                               <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
                             </label>
                             <div>
@@ -2117,7 +2144,7 @@ export function SettingsPage() {
 
                           <div className="flex items-start gap-3 p-3 rounded-lg bg-secondary/20 border border-border/40">
                             <label className="relative inline-flex items-center cursor-pointer select-none flex-shrink-0 mt-0.5">
-                              <input name="notifyPospuesto" type="checkbox" defaultChecked={(localStorage.getItem('wisp_suspension_notify_pospuesto') || 'true') === 'true'} className="sr-only peer" />
+                              <input name="notifyPospuesto" type="checkbox" defaultChecked={suspensionData?.suspension_notify_pospuesto ?? true} className="sr-only peer" />
                               <div className="w-9 h-5 bg-secondary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-muted-foreground after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-500"></div>
                             </label>
                             <div>
